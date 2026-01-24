@@ -4,6 +4,8 @@ def str_to_bool(val: str) -> bool:
         return val.lower() == 'true'
 
 class Config:
+    SCHEDULER_ENABLED = str_to_bool(os.getenv("SCHEDULER_ENABLED", 'True'))
+
     SMTP_SERVER = os.environ.get("SMTP_SERVER")
     SMTP_PORT:int = int(os.environ.get("SMTP_PORT", 587))
 
