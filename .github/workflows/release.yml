@@ -1,0 +1,106 @@
+# .github/workflows/release.yml
+name: Release and Publish Docker Image
+# This workflow builds and publishes a Docker image to GitHub Container Registry
+# The action is allways tagged by the latest version + a version bump
+# This ccan be extended to include more complex versioning strategies like patching an older minor
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "Version bump type"
+        required: true
+        default: "patch"
+        type: choice
+        options:
+          - major
+          - minor
+          - patch
+
+permissions:
+  contents: write       # for tagging
+
+jobs:
+  test:
+    uses: ./.github/workflows/test-component.yml
+
+  release:
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Required to get tags and full history
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Get Latest Tag
+        id: get_latest_tag
+        run: |
+          git fetch --tags
+          TAG=$(git tag -l --sort -version:refname | head -n 1 || echo "0.0.0")
+          echo "Latest tag found: $TAG"
+          echo "latest_tag=$TAG" >> $GITHUB_OUTPUT
+          
+      - name: Bump Version
+        id: bump_version
+        run: |
+          OLD=${{ steps.get_latest_tag.outputs.latest_tag }}
+          PART=${{ github.event.inputs.release_type }}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$OLD"
+
+          case "$PART" in
+            major) ((MAJOR+=1)); MINOR=0; PATCH=0 ;;
+            minor) ((MINOR+=1)); PATCH=0 ;;
+            patch) ((PATCH+=1)) ;;
+            *) echo "Invalid release type"; exit 1 ;;
+          esac
+
+          NEW="$MAJOR.$MINOR.$PATCH"
+          echo "new_tag=$NEW" >> $GITHUB_OUTPUT
+
+      - name: Set up Git for Tag Push
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag ${{ steps.bump_version.outputs.new_tag }}
+          git push origin ${{ steps.bump_version.outputs.new_tag }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      #- name: Log in to GitHub Container Registry
+      #  run: echo "${{ secrets.CR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.CR_PAT }}
+
+      - name: Build and Push Multi-Arch Docker Image
+        run: |
+          IMAGE=ghcr.io/${{ github.repository }}
+          VERSION=${{ steps.bump_version.outputs.new_tag }}
+
+          docker buildx build \
+          --platform linux/amd64,linux/arm64 \
+          --tag $IMAGE:$VERSION \
+          --tag $IMAGE:latest \
+          --push .
+
+#      - name: Build and Push Docker Image
+#        run: |
+#          IMAGE=ghcr.io/${{ github.repository }}
+#          VERSION=${{ steps.bump_version.outputs.new_tag }}
+#
+#          docker build -t $IMAGE:$VERSION .
+#          docker tag $IMAGE:$VERSION $IMAGE:latest
+#          docker push $IMAGE:$VERSION
+#          docker push $IMAGE:latest

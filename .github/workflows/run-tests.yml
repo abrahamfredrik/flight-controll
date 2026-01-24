@@ -1,0 +1,12 @@
+# .github/workflows/test.yml
+name: Run Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    uses: ./.github/workflows/test-component.yml
