@@ -121,3 +121,55 @@ def test_send_events_email_uses_sender(mock_mongo_client):
 
     fake_sender_cls.assert_called_once_with(config.SMTP_SERVER, config.SMTP_PORT, config.SMTP_USERNAME, config.SMTP_PASSWORD)
     fake_sender_instance.send_email.assert_called_once()
+
+
+@patch.object(es_module, 'MongoClient')
+def test_detect_and_remove_deleted_events(mock_mongo_client):
+    config = DummyConfig()
+
+    mock_collection = MagicMock()
+
+    # existing uids in DB: 'keep' and 'removed'
+    stored_doc_removed = {"uid": "removed", "summary": "Removed", "start_time": "s2", "end_time": "e2"}
+
+    def find_side(query=None, projection=None):
+        # first call: find({}, {"uid":1}) -> return both uids
+        if query == {} and projection == {"uid": 1}:
+            return [{"uid": "keep"}, {"uid": "removed"}]
+        # second call: find({"uid": {"$in": removed_uids}}) -> return stored doc(s)
+        if isinstance(query, dict) and "uid" in query and "$in" in query["uid"]:
+            return [stored_doc_removed]
+        return []
+
+    mock_collection.find.side_effect = lambda *args, **kwargs: find_side(*args, **kwargs)
+    mock_collection.delete_many = MagicMock()
+
+    mock_db = {config.MONGO_COLLECTION: mock_collection}
+    mock_client = MagicMock()
+    mock_client.__getitem__.return_value = mock_db
+    mock_mongo_client.return_value = mock_client
+
+    # Fake fetcher returns only 'keep' event (so 'removed' is missing)
+    class FakeFetcher:
+        def __init__(self, url):
+            pass
+
+        def fetch_events(self):
+            return [{"uid": "keep", "summary": "Keep", "dtstart": "s1", "dtend": "e1"}]
+
+    fake_sender_cls = MagicMock()
+    fake_sender_instance = MagicMock()
+    fake_sender_cls.return_value = fake_sender_instance
+
+    es = EventService(config=config, email_sender_cls=fake_sender_cls, fetcher_cls=FakeFetcher)
+
+    out = es.fetch_persist_and_send_events()
+
+    # no new events in this scenario
+    assert out == []
+
+    # verify delete was called for the removed uid
+    mock_collection.delete_many.assert_called_once_with({"uid": {"$in": ["removed"]}})
+
+    # verify removal email was sent
+    fake_sender_instance.send_email.assert_called_once()
