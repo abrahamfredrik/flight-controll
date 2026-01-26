@@ -101,3 +101,32 @@ def test_fetch_events_raises_for_bad_http(mock_get):
 
     with pytest.raises(Exception, match="404 Not Found"):
         fetcher.fetch_events()
+
+
+@patch("app.webcal.fetcher.requests.get")
+def test_fetch_events_parses_seconds_and_tzid(mock_get):
+    ical_data = """BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:event-4@example.com
+DTSTART;TZID=Europe/Berlin:20260126T101530
+DTEND;TZID=Europe/Berlin:20260126T111530
+SUMMARY:With Seconds and TZID
+LOCATION:Berlin
+END:VEVENT
+END:VCALENDAR"""
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.text = ical_data
+    mock_get.return_value = mock_response
+
+    fetcher = WebcalFetcher("https://example.com/calendar.ics")
+    events = fetcher.fetch_events()
+
+    assert len(events) == 1
+    assert events[0]["uid"] == "event-4@example.com"
+    # seconds-aware parsing should produce datetime objects
+    from datetime import datetime
+
+    assert events[0]["dtstart"] == datetime(2026, 1, 26, 10, 15, 30)
+    assert events[0]["dtend"] == datetime(2026, 1, 26, 11, 15, 30)
