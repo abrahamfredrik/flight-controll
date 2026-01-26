@@ -2,8 +2,9 @@
 import shutil
 import os
 import pytest
-from app.rest import register_blueprints
 from flask import Flask
+from app import create_app
+
 
 def pytest_sessionfinish(session, exitstatus):
     for root, dirs, files in os.walk("."):
@@ -29,11 +30,9 @@ class TestConfig:
 
 @pytest.fixture(scope='session')
 def app():
-    app = Flask(__name__)
-    app.config.from_object(TestConfig)
-    app.app_config = TestConfig()
+    # use the application factory so tests exercise the same initialization
+    app = create_app(config_object=TestConfig, enable_scheduler=False)
     app.config['TESTING'] = True
-    register_blueprints(app)
     return app
 
 @pytest.fixture
