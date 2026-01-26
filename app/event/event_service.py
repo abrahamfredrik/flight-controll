@@ -1,5 +1,6 @@
 import logging
 from typing import List, Dict, Any, Optional, Set
+from datetime import datetime, timezone, timedelta
 
 from pymongo import MongoClient
 from app.webcal.fetcher import WebcalFetcher
@@ -173,10 +174,48 @@ class EventService:
         """
         removed_uids = list(existing_all - fetched_uids)
         removed_events: List[Dict[str, Any]] = []
-        if removed_uids:
-            removed_events = list(self.events_collection.find({"uid": {"$in": removed_uids}}))
-            self.events_collection.delete_many({"uid": {"$in": removed_uids}})
-        return removed_events
+        if not removed_uids:
+            return removed_events
+
+        # Retrieve stored docs for the removed uids
+        stored = list(self.events_collection.find({"uid": {"$in": removed_uids}}))
+
+        # Only consider events whose start time is within the allowed window.
+        # We allow removal for events that start in the future or started within
+        # the last 10 hours.
+        now = datetime.now(timezone.utc)
+        threshold = now - timedelta(hours=10)
+
+        def _parse_start(d: Dict[str, Any]) -> Optional[datetime]:
+            for k in ("start_time", "dtstart"):
+                v = d.get(k)
+                if isinstance(v, datetime):
+                    dt = v
+                elif isinstance(v, str):
+                    try:
+                        dt = datetime.fromisoformat(v)
+                    except Exception:
+                        continue
+                else:
+                    continue
+
+                # make timezone-aware: assume UTC when no tzinfo
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
+
+        future_docs = []
+        for doc in stored:
+            st = _parse_start(doc)
+            if st is not None and st > threshold:
+                future_docs.append(doc)
+
+        # delete only the future events from DB and return them for email
+        if future_docs:
+            future_uids = [d["uid"] for d in future_docs]
+            self.events_collection.delete_many({"uid": {"$in": future_uids}})
+
+        return future_docs
 
     def fetch_persist_and_send_events(self) -> List[Dict[str, Any]]:
         # fetch remote events

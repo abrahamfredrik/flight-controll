@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from app.event import event_service as es_module
 from app.event.event_service import EventService
@@ -130,7 +130,8 @@ def test_detect_and_remove_deleted_events(mock_mongo_client):
     mock_collection = MagicMock()
 
     # existing uids in DB: 'keep' and 'removed'
-    stored_doc_removed = {"uid": "removed", "summary": "Removed", "start_time": "s2", "end_time": "e2"}
+    # ensure removed event has a future start time so it is eligible for removal
+    stored_doc_removed = {"uid": "removed", "summary": "Removed", "start_time": "2099-01-01T10:00:00", "end_time": "2099-01-01T11:00:00"}
 
     def find_side(query=None, projection=None):
         # first call: find({}, {"uid":1}) -> return both uids
@@ -173,3 +174,107 @@ def test_detect_and_remove_deleted_events(mock_mongo_client):
 
     # verify removal email was sent
     fake_sender_instance.send_email.assert_called_once()
+
+
+@patch.object(es_module, 'MongoClient')
+def test_past_removed_event_is_ignored(mock_mongo_client):
+    """If a stored event is removed but its start time is in the past, it should not be deleted or emailed about."""
+    config = DummyConfig()
+
+    mock_collection = MagicMock()
+
+    # stored event has a past start time
+    stored_doc_removed = {"uid": "removed", "summary": "Removed", "start_time": "2000-01-01T10:00:00", "end_time": "2000-01-01T11:00:00"}
+
+    def find_side(query=None, projection=None):
+        if query == {} and projection == {"uid": 1}:
+            return [{"uid": "keep"}, {"uid": "removed"}]
+        if isinstance(query, dict) and "uid" in query and "$in" in query["uid"]:
+            # return stored doc when asked about removed_uids
+            return [stored_doc_removed]
+        return []
+
+    mock_collection.find.side_effect = lambda *args, **kwargs: find_side(*args, **kwargs)
+    mock_collection.delete_many = MagicMock()
+
+    mock_db = {config.MONGO_COLLECTION: mock_collection}
+    mock_client = MagicMock()
+    mock_client.__getitem__.return_value = mock_db
+    mock_mongo_client.return_value = mock_client
+
+    # Fake fetcher returns only 'keep' event
+    class FakeFetcher:
+        def __init__(self, url):
+            pass
+
+        def fetch_events(self):
+            return [{"uid": "keep", "summary": "Keep", "dtstart": "s1", "dtend": "e1"}]
+
+    fake_sender_cls = MagicMock()
+    fake_sender_instance = MagicMock()
+    fake_sender_cls.return_value = fake_sender_instance
+
+    es = EventService(config=config, email_sender_cls=fake_sender_cls, fetcher_cls=FakeFetcher)
+
+    out = es.fetch_persist_and_send_events()
+
+    # no new events
+    assert out == []
+
+    # verify delete_many was NOT called because stored event is in the past
+    mock_collection.delete_many.assert_not_called()
+
+    # verify no email was sent about removals
+    fake_sender_instance.send_email.assert_not_called()
+
+
+@patch.object(es_module, 'MongoClient')
+def test_recent_removed_event_is_removed(mock_mongo_client):
+    """A stored event that started within the last 10 hours should be removed and emailed about."""
+    config = DummyConfig()
+
+    mock_collection = MagicMock()
+
+    # stored event started 5 hours ago (within the 10h window)
+    recent_start = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
+    stored_doc_removed = {"uid": "recent", "summary": "RecentRemoved", "start_time": recent_start, "end_time": "2099-01-01T11:00:00"}
+
+    def find_side(query=None, projection=None):
+        if query == {} and projection == {"uid": 1}:
+            return [{"uid": "keep"}, {"uid": "recent"}]
+        if isinstance(query, dict) and "uid" in query and "$in" in query["uid"]:
+            return [stored_doc_removed]
+        return []
+
+    mock_collection.find.side_effect = lambda *args, **kwargs: find_side(*args, **kwargs)
+    mock_collection.delete_many = MagicMock()
+
+    mock_db = {config.MONGO_COLLECTION: mock_collection}
+    mock_client = MagicMock()
+    mock_client.__getitem__.return_value = mock_db
+    mock_mongo_client.return_value = mock_client
+
+    # Fake fetcher returns only 'keep' event
+    class FakeFetcher:
+        def __init__(self, url):
+            pass
+
+        def fetch_events(self):
+            return [{"uid": "keep", "summary": "Keep", "dtstart": "s1", "dtend": "e1"}]
+
+    fake_sender_cls = MagicMock()
+    fake_sender_instance = MagicMock()
+    fake_sender_cls.return_value = fake_sender_instance
+
+    es = EventService(config=config, email_sender_cls=fake_sender_cls, fetcher_cls=FakeFetcher)
+
+    out = es.fetch_persist_and_send_events()
+
+    # no new events
+    assert out == []
+
+    # verify delete_many was called because stored event started within 10h
+    mock_collection.delete_many.assert_called_once()
+
+    # verify email was sent about removal
+    fake_sender_instance.send_email.assert_called()
