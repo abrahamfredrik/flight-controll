@@ -1,5 +1,5 @@
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from pymongo import MongoClient
 from app.webcal.fetcher import WebcalFetcher
@@ -7,14 +7,40 @@ from app.mail.sender import EmailSender
 from app.config import Config
 
 class EventService:
-    def __init__(self, config: Config, email_sender_cls=EmailSender, fetcher_cls=WebcalFetcher):
+    """Service responsible for fetching events, persisting new ones and sending email.
+
+    Improvements:
+    - Accept optional `mongo_client` or `events_collection` to allow dependency injection
+      for testing and to avoid creating real network clients at import-time.
+    - Keep backwards compatibility when mongo_client/events_collection are not provided.
+    """
+
+    def __init__(
+        self,
+        config: Config,
+        email_sender_cls=EmailSender,
+        fetcher_cls=WebcalFetcher,
+        mongo_client: Optional[MongoClient] = None,
+        events_collection: Optional[object] = None,
+    ):
         self.logger = logging.getLogger(__name__)
         self.config = config
         self.email_sender_cls = email_sender_cls
         self.fetcher_cls = fetcher_cls
-        
-        self.mongo_uri = f"mongodb+srv://{self.config.MONGO_USERNAME}:{self.config.MONGO_PASSWORD}@{self.config.MONGO_HOST}/{self.config.MONGO_DB}?retryWrites=true&w=majority"
-        self.mongo_client = MongoClient(self.mongo_uri)
+
+        # allow tests to inject a fake collection directly
+        if events_collection is not None:
+            self.events_collection = events_collection
+            self.mongo_client = mongo_client
+            self.db = None
+            return
+
+        # otherwise construct or use provided mongo_client
+        self.mongo_uri = (
+            f"mongodb+srv://{self.config.MONGO_USERNAME}:{self.config.MONGO_PASSWORD}@"
+            f"{self.config.MONGO_HOST}/{self.config.MONGO_DB}?retryWrites=true&w=majority"
+        )
+        self.mongo_client = mongo_client or MongoClient(self.mongo_uri)
         self.db = self.mongo_client[self.config.MONGO_DB]
         self.events_collection = self.db[self.config.MONGO_COLLECTION]
         
