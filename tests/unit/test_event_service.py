@@ -21,20 +21,16 @@ class DummyConfig:
 
 
 @patch.object(es_module, 'MongoClient')
-def test_store_events_inserts_only_new(mock_mongo_client):
+def test_store_events_inserts_only_new(mock_mongo_client, fake_collection, fake_sender_cls):
     config = DummyConfig()
 
-    mock_collection = MagicMock()
-    # find_one returns None for new event
-    mock_collection.find_one.return_value = None
-
-    # Build a fake mongo client that returns a db containing our collection
-    mock_db = {config.MONGO_COLLECTION: mock_collection}
+    # Build a fake mongo client that returns a db containing our fixture collection
+    mock_db = {config.MONGO_COLLECTION: fake_collection}
     mock_client = MagicMock()
     mock_client.__getitem__.return_value = mock_db
     mock_mongo_client.return_value = mock_client
 
-    es = EventService(config=config, email_sender_cls=MagicMock, fetcher_cls=MagicMock)
+    es = EventService(config=config, email_sender_cls=fake_sender_cls[0], fetcher_cls=MagicMock)
 
     events = [
         {"uid": "uid-1", "summary": "S", "dtstart": "s", "dtend": "e"}
@@ -43,8 +39,8 @@ def test_store_events_inserts_only_new(mock_mongo_client):
     res = es.store_events(events)
 
     assert res == events
-    mock_collection.find_one.assert_called_once_with({"uid": "uid-1"})
-    mock_collection.insert_one.assert_called_once()
+    fake_collection.find_one.assert_called_once_with({"uid": "uid-1"})
+    fake_collection.insert_one.assert_called_once()
 
 
 @patch.object(es_module, 'MongoClient')
@@ -101,17 +97,13 @@ def test_fetch_events_filters_privileged_location(mock_mongo_client):
 
 
 @patch.object(es_module, 'MongoClient')
-def test_send_events_email_uses_sender(mock_mongo_client):
+def test_send_events_email_uses_sender(mock_mongo_client, fake_collection, fake_sender_cls):
     config = DummyConfig()
     mock_client = MagicMock()
-    mock_client.__getitem__.return_value = {config.MONGO_COLLECTION: MagicMock()}
+    mock_client.__getitem__.return_value = {config.MONGO_COLLECTION: fake_collection}
     mock_mongo_client.return_value = mock_client
 
-    fake_sender_cls = MagicMock()
-    fake_sender_instance = MagicMock()
-    fake_sender_cls.return_value = fake_sender_instance
-
-    es = EventService(config=config, email_sender_cls=fake_sender_cls, fetcher_cls=MagicMock)
+    es = EventService(config=config, email_sender_cls=fake_sender_cls[0], fetcher_cls=MagicMock)
 
     events = [
         {"uid": "1", "summary": "S1", "dtstart": "ds", "dtend": "de", "description": "d", "location": "l"}
@@ -119,61 +111,78 @@ def test_send_events_email_uses_sender(mock_mongo_client):
 
     es.send_events_email(events)
 
-    fake_sender_cls.assert_called_once_with(config.SMTP_SERVER, config.SMTP_PORT, config.SMTP_USERNAME, config.SMTP_PASSWORD)
-    fake_sender_instance.send_email.assert_called_once()
+    fake_sender_cls[0].assert_called_once_with(config.SMTP_SERVER, config.SMTP_PORT, config.SMTP_USERNAME, config.SMTP_PASSWORD)
+    fake_sender_cls[1].send_email.assert_called_once()
 
 
 @patch.object(es_module, 'MongoClient')
-def test_detect_and_remove_deleted_events(mock_mongo_client):
+def test_removed_event_behavior(mock_mongo_client, fake_collection, fake_sender_cls):
+    """Parametrized test covering future, past and recent (within 10h) removed-event behavior."""
     config = DummyConfig()
 
-    mock_collection = MagicMock()
+    def run_case(start_kind, uid):
+        # prepare stored doc depending on case
+        if start_kind == "future":
+            start_time = "2099-01-01T10:00:00"
+        elif start_kind == "past":
+            start_time = "2000-01-01T10:00:00"
+        else:  # recent
+            from datetime import datetime, timedelta, timezone
 
-    # existing uids in DB: 'keep' and 'removed'
-    # ensure removed event has a future start time so it is eligible for removal
-    stored_doc_removed = {"uid": "removed", "summary": "Removed", "start_time": "2099-01-01T10:00:00", "end_time": "2099-01-01T11:00:00"}
+            start_time = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
 
-    def find_side(query=None, projection=None):
-        # first call: find({}, {"uid":1}) -> return both uids
-        if query == {} and projection == {"uid": 1}:
-            return [{"uid": "keep"}, {"uid": "removed"}]
-        # second call: find({"uid": {"$in": removed_uids}}) -> return stored doc(s)
-        if isinstance(query, dict) and "uid" in query and "$in" in query["uid"]:
-            return [stored_doc_removed]
-        return []
+        stored_doc = {"uid": uid, "summary": "Removed", "start_time": start_time, "end_time": "2099-01-01T11:00:00"}
 
-    mock_collection.find.side_effect = lambda *args, **kwargs: find_side(*args, **kwargs)
-    mock_collection.delete_many = MagicMock()
+        def find_side(query=None, projection=None):
+            if query == {} and projection == {"uid": 1}:
+                return [{"uid": "keep"}, {"uid": uid}]
+            if isinstance(query, dict) and "uid" in query and "$in" in query["uid"]:
+                return [stored_doc]
+            return []
 
-    mock_db = {config.MONGO_COLLECTION: mock_collection}
-    mock_client = MagicMock()
-    mock_client.__getitem__.return_value = mock_db
-    mock_mongo_client.return_value = mock_client
+        fake_collection.find.side_effect = lambda *args, **kwargs: find_side(*args, **kwargs)
+        fake_collection.delete_many = MagicMock()
 
-    # Fake fetcher returns only 'keep' event (so 'removed' is missing)
-    class FakeFetcher:
-        def __init__(self, url):
-            pass
+        mock_db = {config.MONGO_COLLECTION: fake_collection}
+        mock_client = MagicMock()
+        mock_client.__getitem__.return_value = mock_db
+        mock_mongo_client.return_value = mock_client
 
-        def fetch_events(self):
-            return [{"uid": "keep", "summary": "Keep", "dtstart": "s1", "dtend": "e1"}]
+        class FakeFetcher:
+            def __init__(self, url):
+                pass
 
-    fake_sender_cls = MagicMock()
-    fake_sender_instance = MagicMock()
-    fake_sender_cls.return_value = fake_sender_instance
+            def fetch_events(self):
+                return [{"uid": "keep", "summary": "Keep", "dtstart": "s1", "dtend": "e1"}]
 
-    es = EventService(config=config, email_sender_cls=fake_sender_cls, fetcher_cls=FakeFetcher)
+        es = EventService(config=config, email_sender_cls=fake_sender_cls[0], fetcher_cls=FakeFetcher)
 
-    out = es.fetch_persist_and_send_events()
+        out = es.fetch_persist_and_send_events()
+        return out
 
-    # no new events in this scenario
+    # future -> removed and emailed
+    out = run_case("future", "removed")
     assert out == []
+    fake_collection.delete_many.assert_called_once()
+    fake_sender_cls[1].send_email.assert_called()
 
-    # verify delete was called for the removed uid
-    mock_collection.delete_many.assert_called_once_with({"uid": {"$in": ["removed"]}})
+    # past -> not removed, not emailed
+    fake_collection.find.side_effect = None
+    fake_sender_cls[1].reset_mock()
+    fake_collection.delete_many.reset_mock()
+    out = run_case("past", "removed")
+    assert out == []
+    fake_collection.delete_many.assert_not_called()
+    fake_sender_cls[1].send_email.assert_not_called()
 
-    # verify removal email was sent
-    fake_sender_instance.send_email.assert_called_once()
+    # recent (within 10h) -> removed and emailed
+    fake_collection.find.side_effect = None
+    fake_sender_cls[1].reset_mock()
+    fake_collection.delete_many.reset_mock()
+    out = run_case("recent", "recent")
+    assert out == []
+    fake_collection.delete_many.assert_called_once()
+    fake_sender_cls[1].send_email.assert_called()
 
 
 @patch.object(es_module, 'MongoClient')

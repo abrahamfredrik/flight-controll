@@ -2,6 +2,7 @@
 import shutil
 import os
 import pytest
+from unittest.mock import MagicMock
 from flask import Flask
 from app import create_app
 
@@ -43,4 +44,22 @@ def client(app):
 def app_context(app):
     with app.app_context():
         yield
+
+@pytest.fixture
+def fake_collection():
+    """Lightweight MagicMock collection used by tests to avoid repetition."""
+    col = MagicMock()
+    col.find_one.return_value = None
+    col.find.return_value = []
+    col.insert_one = MagicMock()
+    col.delete_many = MagicMock()
+    col.update_one = MagicMock()
+    return col
+
+@pytest.fixture
+def fake_sender_cls():
+    """Returns a (sender_cls, sender_instance) pair where the class constructs the instance."""
+    inst = MagicMock()
+    cls = MagicMock(return_value=inst)
+    return cls, inst
 
