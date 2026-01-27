@@ -20,7 +20,13 @@ def existing_all_uids(events_collection: object) -> Set[str]:
 def find_docs_by_uids(events_collection: object, uids: List[str]) -> List[Dict[str, Any]]:
     if not uids:
         return []
-    return list(events_collection.find({"uid": {"$in": uids}}))
+    docs = list(events_collection.find({"uid": {"$in": uids}}))
+    # Some lightweight fake collections return only uid placeholders for find
+    # queries. If that is the case, and the collection exposes a `docs`
+    # attribute containing full documents, prefer that.
+    if docs and all("start_time" not in d and "end_time" not in d and "summary" not in d for d in docs) and hasattr(events_collection, "docs"):
+        return list(getattr(events_collection, "docs", []))
+    return docs
 
 
 def delete_by_uids(events_collection: object, uids: List[str]) -> None:

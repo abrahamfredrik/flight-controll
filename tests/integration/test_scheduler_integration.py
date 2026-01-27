@@ -21,6 +21,12 @@ class FakeCollection:
         uids = query.get("uid", {}).get("$in", [])
         return [{"uid": d["uid"]} for d in self.docs if d["uid"] in uids]
 
+    def delete_many(self, query):
+        uids = query.get("uid", {}).get("$in", [])
+        if not uids:
+            return
+        self.docs = [d for d in self.docs if d.get("uid") not in uids]
+
 
 class FakeFetcher:
     def __init__(self, url):
@@ -174,3 +180,151 @@ def test_scheduler_multiple_events_single_email(app):
     assert "Event One" in sent["body"]
     assert "Event Two" in sent["body"]
     assert "Event Three" in sent["body"]
+
+
+def test_scheduler_reports_removed_future_event(app):
+    """If an event that existed in DB is no longer in the fetched feed and
+    its start is in the future (or within allowed window), it should be
+    removed and an email sent."""
+
+    class EmptyFetcher(FakeFetcher):
+        def fetch_events(self):
+            return []
+
+    # create EventService instance without calling its real __init__
+    es = object.__new__(EventService)
+    es.logger = None
+    es.config = app.app_config
+    es.config.WEB_CAL_URL = "http://test.local/calendar.ics"
+    es.email_sender_cls = FakeEmailSender
+    es.fetcher_cls = EmptyFetcher
+
+    # prepare fake collection with an event in the future
+    fc = FakeCollection()
+    fc.insert_one({
+        "uid": "to-remove",
+        "summary": "Will be removed",
+        "start_time": "2099-01-01T10:00:00",
+        "end_time": "2099-01-01T11:00:00",
+        "description": "Desc",
+        "location": "Location R",
+    })
+    es.events_collection = fc
+
+    FakeEmailSender.sent.clear()
+
+    events = es.fetch_persist_and_send_events()
+
+    # no new events returned
+    assert events == []
+    # removed from fake collection
+    assert len(es.events_collection.docs) == 0
+    # and an email should have been sent about removals
+    assert len(FakeEmailSender.sent) == 1
+    sent = FakeEmailSender.sent[0]
+    assert "Removed Events" in sent["body"]
+
+
+def test_scheduler_ignores_removed_past_event(app):
+    """If a stored event was removed but its start is long in the past it
+    should not be deleted or emailed about."""
+
+    class EmptyFetcher(FakeFetcher):
+        def fetch_events(self):
+            return []
+
+    es = object.__new__(EventService)
+    es.logger = None
+    es.config = app.app_config
+    es.config.WEB_CAL_URL = "http://test.local/calendar.ics"
+    es.email_sender_cls = FakeEmailSender
+    es.fetcher_cls = EmptyFetcher
+
+    fc = FakeCollection()
+    fc.insert_one({
+        "uid": "past-event",
+        "summary": "Past",
+        "start_time": "2000-01-01T10:00:00",
+        "end_time": "2000-01-01T11:00:00",
+        "description": "Desc",
+        "location": "Location P",
+    })
+    es.events_collection = fc
+
+    FakeEmailSender.sent.clear()
+
+    events = es.fetch_persist_and_send_events()
+
+    assert events == []
+    # should remain in collection
+    assert len(es.events_collection.docs) == 1
+    # and no email sent
+    assert not FakeEmailSender.sent
+
+
+def test_scheduler_reports_updated_event(app):
+    """When an existing stored event changes start/end, it should be
+    reported as updated. Use a FakeCollection that supports update_one so
+    we can assert the DB update took place."""
+
+    class UpdateableFakeCollection(FakeCollection):
+        def update_one(self, query, payload):
+            uid = query.get("uid")
+            for d in self.docs:
+                if d.get("uid") == uid:
+                    # apply $set payload
+                    for k, v in payload.get("$set", {}).items():
+                        d[k] = v
+                    return True
+            return False
+
+        def find(self, query, projection=None):
+            # return full docs for $in queries so code can read start_time
+            uids = query.get("uid", {}).get("$in", [])
+            return [d for d in self.docs if d["uid"] in uids]
+
+    class UpdateFetcher(FakeFetcher):
+        def fetch_events(self):
+            return [
+                {
+                    "uid": "u-upd",
+                    "summary": "Updated Summary",
+                    "dtstart": "2099-02-02T10:00:00",
+                    "dtend": "2099-02-02T11:00:00",
+                    "description": "Desc",
+                    "location": "Location U",
+                }
+            ]
+
+    es = object.__new__(EventService)
+    es.logger = None
+    es.config = app.app_config
+    es.config.WEB_CAL_URL = "http://test.local/calendar.ics"
+    es.email_sender_cls = FakeEmailSender
+    es.fetcher_cls = UpdateFetcher
+
+    fc = UpdateableFakeCollection()
+    fc.insert_one({
+        "uid": "u-upd",
+        "summary": "Old Summary",
+        "start_time": "2099-01-01T10:00:00",
+        "end_time": "2099-01-01T11:00:00",
+        "description": "Desc",
+        "location": "Location U",
+    })
+    es.events_collection = fc
+
+    FakeEmailSender.sent.clear()
+
+    events = es.fetch_persist_and_send_events()
+
+    # no new events returned
+    assert events == []
+
+    # DB should have been updated by update_one (allow timezone suffix)
+    assert es.events_collection.docs[0]["start_time"].startswith("2099-02-02T10:00:00")
+
+    # and an email should have been sent about the update
+    assert len(FakeEmailSender.sent) == 1
+    sent = FakeEmailSender.sent[0]
+    assert "Updated Events" in sent["body"]
