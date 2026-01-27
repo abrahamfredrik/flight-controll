@@ -278,3 +278,58 @@ def test_recent_removed_event_is_removed(mock_mongo_client):
 
     # verify email was sent about removal
     fake_sender_instance.send_email.assert_called()
+
+
+@patch.object(es_module, 'MongoClient')
+def test_detect_and_apply_updates(mock_mongo_client):
+    """When a fetched event has updated start/end, the DB should be updated and the summary email should include the change."""
+    config = DummyConfig()
+
+    mock_collection = MagicMock()
+
+    stored_doc = {"uid": "u1", "summary": "EventOld", "start_time": "2099-01-01T10:00:00", "end_time": "2099-01-01T11:00:00", "description": "d", "location": "L"}
+
+    def find_side(query=None, projection=None):
+        # matching uids query
+        if isinstance(query, dict) and "uid" in query and "$in" in query["uid"]:
+            # return stored_doc when asked for uids
+            return [stored_doc]
+        if query == {} and projection == {"uid": 1}:
+            return [{"uid": "u1"}]
+        return []
+
+    mock_collection.find.side_effect = lambda *args, **kwargs: find_side(*args, **kwargs)
+    mock_collection.update_one = MagicMock()
+
+    mock_db = {config.MONGO_COLLECTION: mock_collection}
+    mock_client = MagicMock()
+    mock_client.__getitem__.return_value = mock_db
+    mock_mongo_client.return_value = mock_client
+
+    # Fake fetcher returns the same uid but with updated times
+    class FakeFetcher:
+        def __init__(self, url):
+            pass
+
+        def fetch_events(self):
+            return [{"uid": "u1", "summary": "EventOld", "dtstart": "2099-01-02T10:00:00", "dtend": "2099-01-02T11:00:00", "description": "d", "location": "L"}]
+
+    fake_sender_cls = MagicMock()
+    fake_sender_instance = MagicMock()
+    fake_sender_cls.return_value = fake_sender_instance
+
+    es = EventService(config=config, email_sender_cls=fake_sender_cls, fetcher_cls=FakeFetcher)
+
+    out = es.fetch_persist_and_send_events()
+
+    # no new events (was an update)
+    assert out == []
+
+    # update_one should have been called to apply new start/end
+    mock_collection.update_one.assert_called_once()
+
+    # summary email must include Updated Events section and show old/new starts
+    fake_sender_instance.send_email.assert_called_once()
+    sent = fake_sender_instance.send_email.call_args[0][2]
+    assert "Updated Events" in sent
+    assert "Old Start" in sent and "New Start" in sent

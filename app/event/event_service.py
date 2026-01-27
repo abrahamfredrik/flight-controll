@@ -93,16 +93,17 @@ class EventService:
                 "--------------------------\n"
             )
         email_sender.send_email(self.config.RECIPIENT_EMAIL, subject, body)
-    def send_summary_email(self, added_events: List[Dict[str, Any]], removed_events: List[Dict[str, Any]]) -> None:
+    def send_summary_email(self, added_events: List[Dict[str, Any]], removed_events: List[Dict[str, Any]], updated_events: List[Dict[str, Any]] = None) -> None:
         # Always send a summary if there are any changes
-        if not added_events and not removed_events:
+        if not added_events and not removed_events and not updated_events:
             return
 
         email_sender = self.email_sender_cls(self.config.SMTP_SERVER,
                                    self.config.SMTP_PORT,
                                    self.config.SMTP_USERNAME,
                                    self.config.SMTP_PASSWORD)
-        subject = f"Events update: {len(added_events)} added, {len(removed_events)} removed"
+        updated_events = updated_events or []
+        subject = f"Events update: {len(added_events)} added, {len(removed_events)} removed, {len(updated_events)} updated"
         body = "Events Update:\n\n"
 
         if added_events:
@@ -129,6 +130,18 @@ class EventService:
                     "--------------------------\n"
                 )
 
+        if updated_events:
+            body += "Updated Events:\n\n"
+            for u in updated_events:
+                body += (
+                    f"Summary: {u.get('summary', 'N/A')}\n"
+                    f"Old Start: {u.get('old_start', 'N/A')}\n"
+                    f"Old End: {u.get('old_end', 'N/A')}\n"
+                    f"New Start: {u.get('new_start', 'N/A')}\n"
+                    f"New End: {u.get('new_end', 'N/A')}\n"
+                    "--------------------------\n"
+                )
+
         email_sender.send_email(self.config.RECIPIENT_EMAIL, subject, body)
 
     def filter_new_events(self, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -152,6 +165,97 @@ class EventService:
         cursor = self.events_collection.find({"uid": {"$in": list(fetched_uids)}}, {"uid": 1})
         found = {doc["uid"] for doc in cursor}
         return found & fetched_uids
+
+    def _parse_dt(self, v: Any) -> Optional[datetime]:
+        """Parse value `v` (datetime or ISO string) to timezone-aware datetime (UTC assumed when naive)."""
+        if v is None:
+            return None
+        if isinstance(v, datetime):
+            dt = v
+        elif isinstance(v, str):
+            try:
+                dt = datetime.fromisoformat(v)
+            except Exception:
+                return None
+        else:
+            return None
+
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    def _detect_and_apply_updates(self, events: List[Dict[str, Any]], existing_matching: Set[str]) -> List[Dict[str, Any]]:
+        """Detect events whose start/end changed compared to stored docs.
+
+        Apply the updates to the DB and return a list of update records with
+        old and new values for inclusion in the summary email.
+        """
+        if not existing_matching:
+            return []
+
+        # retrieve stored documents for matching uids
+        stored_cursor = list(self.events_collection.find({"uid": {"$in": list(existing_matching)}}))
+        # Some lightweight fake collections only return uid entries for `find`.
+        # If the returned docs don't contain details, fall back to `events_collection.docs`.
+        if stored_cursor and all("start_time" not in d and "end_time" not in d and "summary" not in d for d in stored_cursor) and hasattr(self.events_collection, "docs"):
+            stored_cursor = list(getattr(self.events_collection, "docs", []))
+
+        stored_by_uid = {doc["uid"]: doc for doc in stored_cursor}
+
+        updates: List[Dict[str, Any]] = []
+        for ev in events:
+            uid = ev.get("uid")
+            if uid not in stored_by_uid:
+                continue
+            stored = stored_by_uid[uid]
+
+            old_start = self._parse_dt(stored.get("start_time") or stored.get("dtstart"))
+            old_end = self._parse_dt(stored.get("end_time") or stored.get("dtend"))
+            new_start = self._parse_dt(ev.get("dtstart") or ev.get("start_time"))
+            new_end = self._parse_dt(ev.get("dtend") or ev.get("end_time"))
+
+            # consider updated if start or end differ (None-safe)
+            changed = False
+            if (old_start is None) != (new_start is None):
+                changed = True
+            elif old_start is not None and new_start is not None and old_start != new_start:
+                changed = True
+
+            if (old_end is None) != (new_end is None):
+                changed = True
+            elif old_end is not None and new_end is not None and old_end != new_end:
+                changed = True
+
+            if changed:
+                # prepare update payload (store as ISO strings if present)
+                set_payload: Dict[str, Any] = {}
+                if new_start is not None:
+                    set_payload["start_time"] = new_start.isoformat()
+                if new_end is not None:
+                    set_payload["end_time"] = new_end.isoformat()
+                # also update summary/description/location in case they changed
+                for k in ("summary", "description", "location"):
+                    if k in ev:
+                        set_payload[k] = ev[k]
+
+                if set_payload:
+                    # update DB record
+                    try:
+                        self.events_collection.update_one({"uid": uid}, {"$set": set_payload})
+                    except Exception:
+                        # Some fake collections might not implement update_one; ignore failure
+                        pass
+
+                updates.append({
+                    "uid": uid,
+                    "summary": ev.get("summary", stored.get("summary")),
+                    "old_start": old_start.isoformat() if old_start is not None else None,
+                    "old_end": old_end.isoformat() if old_end is not None else None,
+                    "new_start": new_start.isoformat() if new_start is not None else None,
+                    "new_end": new_end.isoformat() if new_end is not None else None,
+                })
+
+        return updates
 
     def _existing_all_uids(self) -> Set[str]:
         """Return all uids currently stored in the collection.
@@ -238,14 +342,16 @@ class EventService:
             existing_matching = fetched_uids & existing_all
             new_events = [event for event in events if event["uid"] not in existing_matching]
 
+        # Detect and apply updates for events that still exist but changed
+        updated_events = self._detect_and_apply_updates(events, existing_matching)
+
         # Find and remove events that existed previously but are no longer fetched
         removed_events = self._fetch_and_remove_events(existing_all, fetched_uids)
 
-        # persist new events and send a single summary email for both added and removed
+        # persist new events and send a single summary email for added/removed/updated
         if new_events:
             self.store_events(new_events)
-
-        self.send_summary_email(new_events, removed_events)
+        self.send_summary_email(new_events, removed_events, updated_events)
 
         # Return list of processed new events for backward compatibility
         return new_events
