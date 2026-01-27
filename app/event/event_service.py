@@ -1,6 +1,7 @@
 import logging
 from typing import List, Dict, Any, Optional, Set
 from datetime import datetime, timezone, timedelta
+from app.event import repository, notifier, utils
 
 from pymongo import MongoClient
 from app.webcal.fetcher import WebcalFetcher
@@ -94,55 +95,9 @@ class EventService:
             )
         email_sender.send_email(self.config.RECIPIENT_EMAIL, subject, body)
     def send_summary_email(self, added_events: List[Dict[str, Any]], removed_events: List[Dict[str, Any]], updated_events: List[Dict[str, Any]] = None) -> None:
-        # Always send a summary if there are any changes
-        if not added_events and not removed_events and not updated_events:
-            return
-
-        email_sender = self.email_sender_cls(self.config.SMTP_SERVER,
-                                   self.config.SMTP_PORT,
-                                   self.config.SMTP_USERNAME,
-                                   self.config.SMTP_PASSWORD)
+        # delegate to notifier to keep formatting centralized
         updated_events = updated_events or []
-        subject = f"Events update: {len(added_events)} added, {len(removed_events)} removed, {len(updated_events)} updated"
-        body = "Events Update:\n\n"
-
-        if added_events:
-            body += "Added Events:\n\n"
-            for event in added_events:
-                body += (
-                    f"Summary: {event.get('summary', 'N/A')}\n"
-                    f"Start Time: {event.get('dtstart', event.get('start_time', 'N/A'))}\n"
-                    f"End Time: {event.get('dtend', event.get('end_time', 'N/A'))}\n"
-                    f"Description: {event.get('description', 'N/A')}\n"
-                    f"Location: {event.get('location', 'N/A')}\n"
-                    "--------------------------\n"
-                )
-
-        if removed_events:
-            body += "Removed Events:\n\n"
-            for event in removed_events:
-                body += (
-                    f"Summary: {event.get('summary', 'N/A')}\n"
-                    f"Start Time: {event.get('start_time', 'N/A')}\n"
-                    f"End Time: {event.get('end_time', 'N/A')}\n"
-                    f"Description: {event.get('description', 'N/A')}\n"
-                    f"Location: {event.get('location', 'N/A')}\n"
-                    "--------------------------\n"
-                )
-
-        if updated_events:
-            body += "Updated Events:\n\n"
-            for u in updated_events:
-                body += (
-                    f"Summary: {u.get('summary', 'N/A')}\n"
-                    f"Old Start: {u.get('old_start', 'N/A')}\n"
-                    f"Old End: {u.get('old_end', 'N/A')}\n"
-                    f"New Start: {u.get('new_start', 'N/A')}\n"
-                    f"New End: {u.get('new_end', 'N/A')}\n"
-                    "--------------------------\n"
-                )
-
-        email_sender.send_email(self.config.RECIPIENT_EMAIL, subject, body)
+        notifier.send_summary(self.email_sender_cls, self.config, added_events or [], removed_events or [], updated_events)
 
     def filter_new_events(self, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         uids = [event["uid"] for event in events]
@@ -153,36 +108,10 @@ class EventService:
         return [event for event in events if event["uid"] not in existing_uids]
 
     def _existing_matching_uids(self, fetched_uids: Set[str]) -> Set[str]:
-        """Return uids from `fetched_uids` that already exist in the DB.
-
-        Uses a $in query which is compatible with the test fakes. The result
-        is intersected with `fetched_uids` to guard against fake find
-        implementations that might return unrelated documents.
-        """
-        if not fetched_uids:
-            return set()
-
-        cursor = self.events_collection.find({"uid": {"$in": list(fetched_uids)}}, {"uid": 1})
-        found = {doc["uid"] for doc in cursor}
-        return found & fetched_uids
+        return repository.existing_matching_uids(self.events_collection, fetched_uids)
 
     def _parse_dt(self, v: Any) -> Optional[datetime]:
-        """Parse value `v` (datetime or ISO string) to timezone-aware datetime (UTC assumed when naive)."""
-        if v is None:
-            return None
-        if isinstance(v, datetime):
-            dt = v
-        elif isinstance(v, str):
-            try:
-                dt = datetime.fromisoformat(v)
-            except Exception:
-                return None
-        else:
-            return None
-
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt
+        return utils.parse_dt(v)
 
     def _detect_and_apply_updates(self, events: List[Dict[str, Any]], existing_matching: Set[str]) -> List[Dict[str, Any]]:
         """Detect events whose start/end changed compared to stored docs.
@@ -194,9 +123,8 @@ class EventService:
             return []
 
         # retrieve stored documents for matching uids
-        stored_cursor = list(self.events_collection.find({"uid": {"$in": list(existing_matching)}}))
+        stored_cursor = repository.find_docs_by_uids(self.events_collection, list(existing_matching))
         # Some lightweight fake collections only return uid entries for `find`.
-        # If the returned docs don't contain details, fall back to `events_collection.docs`.
         if stored_cursor and all("start_time" not in d and "end_time" not in d and "summary" not in d for d in stored_cursor) and hasattr(self.events_collection, "docs"):
             stored_cursor = list(getattr(self.events_collection, "docs", []))
 
@@ -209,10 +137,10 @@ class EventService:
                 continue
             stored = stored_by_uid[uid]
 
-            old_start = self._parse_dt(stored.get("start_time") or stored.get("dtstart"))
-            old_end = self._parse_dt(stored.get("end_time") or stored.get("dtend"))
-            new_start = self._parse_dt(ev.get("dtstart") or ev.get("start_time"))
-            new_end = self._parse_dt(ev.get("dtend") or ev.get("end_time"))
+            old_start = utils.parse_dt(stored.get("start_time") or stored.get("dtstart"))
+            old_end = utils.parse_dt(stored.get("end_time") or stored.get("dtend"))
+            new_start = utils.parse_dt(ev.get("dtstart") or ev.get("start_time"))
+            new_end = utils.parse_dt(ev.get("dtend") or ev.get("end_time"))
 
             # consider updated if start or end differ (None-safe)
             changed = False
@@ -239,12 +167,7 @@ class EventService:
                         set_payload[k] = ev[k]
 
                 if set_payload:
-                    # update DB record
-                    try:
-                        self.events_collection.update_one({"uid": uid}, {"$set": set_payload})
-                    except Exception:
-                        # Some fake collections might not implement update_one; ignore failure
-                        pass
+                    repository.update_one(self.events_collection, uid, set_payload)
 
                 updates.append({
                     "uid": uid,
@@ -263,11 +186,7 @@ class EventService:
         This prefers a normal `find({}, {"uid":1})` but falls back to a
         `docs` attribute (used by the lightweight FakeCollection in tests).
         """
-        cursor = self.events_collection.find({}, {"uid": 1})
-        existing_all = {doc["uid"] for doc in cursor}
-        if not existing_all and hasattr(self.events_collection, "docs"):
-            existing_all = {d["uid"] for d in getattr(self.events_collection, "docs", [])}
-        return existing_all
+        return repository.existing_all_uids(self.events_collection)
 
     def _fetch_and_remove_events(self, existing_all: Set[str], fetched_uids: Set[str]) -> List[Dict[str, Any]]:
         """Return list of removed event documents (and delete them from DB).
@@ -282,42 +201,19 @@ class EventService:
             return removed_events
 
         # Retrieve stored docs for the removed uids
-        stored = list(self.events_collection.find({"uid": {"$in": removed_uids}}))
+        stored = repository.find_docs_by_uids(self.events_collection, removed_uids)
 
         # Only consider events whose start time is within the allowed window.
-        # We allow removal for events that start in the future or started within
-        # the last 10 hours.
-        now = datetime.now(timezone.utc)
-        threshold = now - timedelta(hours=10)
-
-        def _parse_start(d: Dict[str, Any]) -> Optional[datetime]:
-            for k in ("start_time", "dtstart"):
-                v = d.get(k)
-                if isinstance(v, datetime):
-                    dt = v
-                elif isinstance(v, str):
-                    try:
-                        dt = datetime.fromisoformat(v)
-                    except Exception:
-                        continue
-                else:
-                    continue
-
-                # make timezone-aware: assume UTC when no tzinfo
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                return dt
-
         future_docs = []
         for doc in stored:
-            st = _parse_start(doc)
-            if st is not None and st > threshold:
+            st = utils.parse_dt(doc.get("start_time") or doc.get("dtstart"))
+            if st is not None and utils.is_within_removal_window(st):
                 future_docs.append(doc)
 
         # delete only the future events from DB and return them for email
         if future_docs:
             future_uids = [d["uid"] for d in future_docs]
-            self.events_collection.delete_many({"uid": {"$in": future_uids}})
+            repository.delete_by_uids(self.events_collection, future_uids)
 
         return future_docs
 
