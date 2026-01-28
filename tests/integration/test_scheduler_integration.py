@@ -1,5 +1,3 @@
-import pytest
-
 from flight_controll.event.event_service import EventService
 
 
@@ -130,14 +128,16 @@ def test_scheduler_no_email_for_existing_event(app):
 
     # prepare fake collection with existing event
     fc = FakeCollection()
-    fc.insert_one({
-        "uid": "uid-123",
-        "summary": "Test Event",
-        "start_time": "2026-01-26T10:00:00",
-        "end_time": "2026-01-26T11:00:00",
-        "description": "Desc",
-        "location": "Location A",
-    })
+    fc.insert_one(
+        {
+            "uid": "uid-123",
+            "summary": "Test Event",
+            "start_time": "2026-01-26T10:00:00",
+            "end_time": "2026-01-26T11:00:00",
+            "description": "Desc",
+            "location": "Location A",
+        }
+    )
     es.events_collection = fc
 
     FakeEmailSender.sent.clear()
@@ -201,14 +201,16 @@ def test_scheduler_reports_removed_future_event(app):
 
     # prepare fake collection with an event in the future
     fc = FakeCollection()
-    fc.insert_one({
-        "uid": "to-remove",
-        "summary": "Will be removed",
-        "start_time": "2099-01-01T10:00:00",
-        "end_time": "2099-01-01T11:00:00",
-        "description": "Desc",
-        "location": "Location R",
-    })
+    fc.insert_one(
+        {
+            "uid": "to-remove",
+            "summary": "Will be removed",
+            "start_time": "2099-01-01T10:00:00",
+            "end_time": "2099-01-01T11:00:00",
+            "description": "Desc",
+            "location": "Location R",
+        }
+    )
     es.events_collection = fc
 
     FakeEmailSender.sent.clear()
@@ -241,14 +243,16 @@ def test_scheduler_ignores_removed_past_event(app):
     es.fetcher_cls = EmptyFetcher
 
     fc = FakeCollection()
-    fc.insert_one({
-        "uid": "past-event",
-        "summary": "Past",
-        "start_time": "2000-01-01T10:00:00",
-        "end_time": "2000-01-01T11:00:00",
-        "description": "Desc",
-        "location": "Location P",
-    })
+    fc.insert_one(
+        {
+            "uid": "past-event",
+            "summary": "Past",
+            "start_time": "2000-01-01T10:00:00",
+            "end_time": "2000-01-01T11:00:00",
+            "description": "Desc",
+            "location": "Location P",
+        }
+    )
     es.events_collection = fc
 
     FakeEmailSender.sent.clear()
@@ -304,14 +308,16 @@ def test_scheduler_reports_updated_event(app):
     es.fetcher_cls = UpdateFetcher
 
     fc = UpdateableFakeCollection()
-    fc.insert_one({
-        "uid": "u-upd",
-        "summary": "Old Summary",
-        "start_time": "2099-01-01T10:00:00",
-        "end_time": "2099-01-01T11:00:00",
-        "description": "Desc",
-        "location": "Location U",
-    })
+    fc.insert_one(
+        {
+            "uid": "u-upd",
+            "summary": "Old Summary",
+            "start_time": "2099-01-01T10:00:00",
+            "end_time": "2099-01-01T11:00:00",
+            "description": "Desc",
+            "location": "Location U",
+        }
+    )
     es.events_collection = fc
 
     FakeEmailSender.sent.clear()

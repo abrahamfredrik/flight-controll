@@ -7,9 +7,7 @@ app = create_app()
 # Logging configuration
 handler = logging.StreamHandler(sys.stdout)
 handler.setLevel(logging.INFO)
-formatter = logging.Formatter(
-    "[%(asctime)s] [%(levelname)s] %(name)s - %(message)s"
-)
+formatter = logging.Formatter("[%(asctime)s] [%(levelname)s] %(name)s - %(message)s")
 handler.setFormatter(formatter)
 
 # Configure Flask app logger

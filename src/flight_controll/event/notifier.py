@@ -1,12 +1,19 @@
 from typing import List, Dict, Any
-from ..mail.sender import EmailSender
 
 
-def send_summary(email_sender_cls, config, added: List[Dict[str, Any]], removed: List[Dict[str, Any]], updated: List[Dict[str, Any]]):
+def send_summary(
+    email_sender_cls,
+    config,
+    added: List[Dict[str, Any]],
+    removed: List[Dict[str, Any]],
+    updated: List[Dict[str, Any]],
+):
     if not added and not removed and not updated:
         return
 
-    email_sender = email_sender_cls(config.SMTP_SERVER, config.SMTP_PORT, config.SMTP_USERNAME, config.SMTP_PASSWORD)
+    email_sender = email_sender_cls(
+        config.SMTP_SERVER, config.SMTP_PORT, config.SMTP_USERNAME, config.SMTP_PASSWORD
+    )
     subject = f"Events update: {len(added)} added, {len(removed)} removed, {len(updated)} updated"
     body = "Events Update:\n\n"
 

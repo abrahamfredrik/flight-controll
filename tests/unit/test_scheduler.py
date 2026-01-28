@@ -7,11 +7,12 @@ class DummyApp:
     def __init__(self):
         class Cfg:
             WEBCAL_SCHEDULER_DELAY_MINUTES = 1
+
         self.app_config = Cfg()
         self.config = {}
 
 
-@patch.object(scheduler_module, 'scheduler')
+@patch.object(scheduler_module, "scheduler")
 def test_init_scheduler_initializes_and_starts(mock_scheduler):
     app = DummyApp()
 

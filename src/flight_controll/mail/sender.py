@@ -31,11 +31,11 @@ class EmailSender:
 
     def send_email(self, recipient: str, subject: str, body: str) -> None:
         msg = MIMEMultipart()
-        msg['From'] = self.username
-        msg['To'] = recipient
-        msg['Subject'] = subject
+        msg["From"] = self.username
+        msg["To"] = recipient
+        msg["Subject"] = subject
 
-        msg.attach(MIMEText(body, 'plain'))
+        msg.attach(MIMEText(body, "plain"))
 
         try:
             smtp_cls = self.smtp_class or smtplib.SMTP
@@ -50,6 +50,7 @@ class EmailSender:
             print(f"Email sent to {recipient}")
         except Exception:
             import sys
+
             e = sys.exc_info()[1]
             logger.exception("Failed to send email to %s", recipient)
             # keep previous behaviour of printing the error for backwards compatibility

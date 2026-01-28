@@ -1,1 +1,1 @@
-from .fetcher import WebcalFetcher
+from .fetcher import WebcalFetcher  # noqa: F401

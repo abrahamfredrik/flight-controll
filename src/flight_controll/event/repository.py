@@ -1,7 +1,9 @@
 from typing import List, Dict, Any, Set, Optional
 
 
-def existing_matching_uids(events_collection: object, fetched_uids: Set[str]) -> Set[str]:
+def existing_matching_uids(
+    events_collection: object, fetched_uids: Set[str]
+) -> Set[str]:
     if not fetched_uids:
         return set()
     cursor = events_collection.find({"uid": {"$in": list(fetched_uids)}}, {"uid": 1})
@@ -17,14 +19,23 @@ def existing_all_uids(events_collection: object) -> Set[str]:
     return existing_all
 
 
-def find_docs_by_uids(events_collection: object, uids: List[str]) -> List[Dict[str, Any]]:
+def find_docs_by_uids(
+    events_collection: object, uids: List[str]
+) -> List[Dict[str, Any]]:
     if not uids:
         return []
     docs = list(events_collection.find({"uid": {"$in": uids}}))
     # Some lightweight fake collections return only uid placeholders for find
     # queries. If that is the case, and the collection exposes a `docs`
     # attribute containing full documents, prefer that.
-    if docs and all("start_time" not in d and "end_time" not in d and "summary" not in d for d in docs) and hasattr(events_collection, "docs"):
+    if (
+        docs
+        and all(
+            "start_time" not in d and "end_time" not in d and "summary" not in d
+            for d in docs
+        )
+        and hasattr(events_collection, "docs")
+    ):
         return list(getattr(events_collection, "docs", []))
     return docs
 
@@ -35,7 +46,9 @@ def delete_by_uids(events_collection: object, uids: List[str]) -> None:
     events_collection.delete_many({"uid": {"$in": uids}})
 
 
-def update_one(events_collection: object, uid: str, set_payload: Dict[str, Any]) -> Optional[object]:
+def update_one(
+    events_collection: object, uid: str, set_payload: Dict[str, Any]
+) -> Optional[object]:
     try:
         return events_collection.update_one({"uid": uid}, {"$set": set_payload})
     except Exception:

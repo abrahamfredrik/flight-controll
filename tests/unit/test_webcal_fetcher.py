@@ -4,7 +4,6 @@ from datetime import datetime
 
 from flight_controll.webcal.fetcher import WebcalFetcher
 
-
 MOCK_ICAL_DATA = """BEGIN:VCALENDAR
 BEGIN:VEVENT
 UID:event-1@example.com
@@ -87,8 +86,8 @@ END:VCALENDAR"""
 
     assert len(events) == 1
     assert events[0]["uid"] == "event-3@example.com"
-    assert events[0]["dtstart"] == None
-    assert events[0]["dtend"] == None
+    assert events[0]["dtstart"] is None
+    assert events[0]["dtend"] is None
 
 
 @patch("flight_controll.webcal.fetcher.requests.get")

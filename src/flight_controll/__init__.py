@@ -6,7 +6,9 @@ from .rest import register_blueprints
 from .scheduler.scheduler import init_scheduler
 
 
-def create_app(config_object: Optional[object] = None, enable_scheduler: Optional[bool] = None):
+def create_app(
+    config_object: Optional[object] = None, enable_scheduler: Optional[bool] = None
+):
     """Create and configure the Flask application.
 
     Args:

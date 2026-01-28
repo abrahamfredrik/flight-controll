@@ -2,6 +2,7 @@ import requests
 import re
 from datetime import datetime
 
+
 class WebcalFetcher:
     def __init__(self, webcal_url: str):
         self.webcal_url = webcal_url
@@ -30,15 +31,23 @@ class WebcalFetcher:
             event["dtend"] = dtend.group(1).strip() if dtend else None
             event["summary"] = summary.group(1).strip() if summary else None
             event["location"] = location.group(1).strip() if location else None
-            event["description"] = description.group(1).strip().replace("\\n", "\n") if description else None
+            event["description"] = (
+                description.group(1).strip().replace("\\n", "\n")
+                if description
+                else None
+            )
 
             # Optionally, parse dates to datetime objects
             if event["dtstart"]:
                 try:
-                    event["dtstart"] = datetime.strptime(event["dtstart"], "%Y%m%dT%H%M%S")
+                    event["dtstart"] = datetime.strptime(
+                        event["dtstart"], "%Y%m%dT%H%M%S"
+                    )
                 except ValueError:
                     try:
-                        event["dtstart"] = datetime.strptime(event["dtstart"], "%Y%m%dT%H%M")
+                        event["dtstart"] = datetime.strptime(
+                            event["dtstart"], "%Y%m%dT%H%M"
+                        )
                     except ValueError:
                         event["dtstart"] = event["dtstart"]
             if event["dtend"]:
@@ -46,7 +55,9 @@ class WebcalFetcher:
                     event["dtend"] = datetime.strptime(event["dtend"], "%Y%m%dT%H%M%S")
                 except ValueError:
                     try:
-                        event["dtend"] = datetime.strptime(event["dtend"], "%Y%m%dT%H%M")
+                        event["dtend"] = datetime.strptime(
+                            event["dtend"], "%Y%m%dT%H%M"
+                        )
                     except ValueError:
                         event["dtend"] = event["dtend"]
 
