@@ -17,6 +17,7 @@ EXPOSE 3001
 # Set environment variables
 ENV FLASK_APP=main.py
 ENV FLASK_RUN_HOST=0.0.0.0
+ENV PYTHONPATH=/app/src
 
 RUN chmod 755 main.py
 
