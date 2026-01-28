@@ -41,8 +41,12 @@ def send_summary(email_sender_cls, config, added: List[Dict[str, Any]], removed:
                 f"Summary: {u.get('summary', 'N/A')}\n"
                 f"Old Start: {u.get('old_start', 'N/A')}\n"
                 f"Old End: {u.get('old_end', 'N/A')}\n"
+                f"Old Description: {u.get('old_description', u.get('description', 'N/A'))}\n"
+                f"Old Location: {u.get('old_location', u.get('location', 'N/A'))}\n"
                 f"New Start: {u.get('new_start', 'N/A')}\n"
                 f"New End: {u.get('new_end', 'N/A')}\n"
+                f"New Description: {u.get('new_description', u.get('description', 'N/A'))}\n"
+                f"New Location: {u.get('new_location', u.get('location', 'N/A'))}\n"
                 "--------------------------\n"
             )
 

@@ -94,10 +94,9 @@ class EventService:
                 "--------------------------\n"
             )
         email_sender.send_email(self.config.RECIPIENT_EMAIL, subject, body)
+        
     def send_summary_email(self, added_events: List[Dict[str, Any]], removed_events: List[Dict[str, Any]], updated_events: List[Dict[str, Any]] = None) -> None:
-        # delegate to notifier to keep formatting centralized
-        updated_events = updated_events or []
-        notifier.send_summary(self.email_sender_cls, self.config, added_events or [], removed_events or [], updated_events)
+        notifier.send_summary(self.email_sender_cls, self.config, added_events or [], removed_events or [], updated_events or [])
 
     def filter_new_events(self, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         uids = [event["uid"] for event in events]
@@ -154,6 +153,17 @@ class EventService:
             elif old_end is not None and new_end is not None and old_end != new_end:
                 changed = True
 
+            # consider description/location changed (None-safe string compare)
+            old_desc = stored.get("description")
+            new_desc = ev.get("description")
+            if (old_desc or "") != (new_desc or ""):
+                changed = True
+
+            old_loc = stored.get("location")
+            new_loc = ev.get("location")
+            if (old_loc or "") != (new_loc or ""):
+                changed = True
+
             if changed:
                 # prepare update payload (store as ISO strings if present)
                 set_payload: Dict[str, Any] = {}
@@ -172,6 +182,10 @@ class EventService:
                 updates.append({
                     "uid": uid,
                     "summary": ev.get("summary", stored.get("summary")),
+                    "old_description": old_desc,
+                    "new_description": new_desc,
+                    "old_location": old_loc,
+                    "new_location": new_loc,
                     "old_start": old_start.isoformat() if old_start is not None else None,
                     "old_end": old_end.isoformat() if old_end is not None else None,
                     "new_start": new_start.isoformat() if new_start is not None else None,

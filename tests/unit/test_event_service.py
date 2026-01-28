@@ -342,3 +342,99 @@ def test_detect_and_apply_updates(mock_mongo_client):
     sent = fake_sender_instance.send_email.call_args[0][2]
     assert "Updated Events" in sent
     assert "Old Start" in sent and "New Start" in sent
+
+
+@patch.object(es_module, 'MongoClient')
+def test_detect_and_apply_updates_description_change(mock_mongo_client):
+    """When only the description changes, it should be detected as an update."""
+    config = DummyConfig()
+
+    mock_collection = MagicMock()
+
+    stored_doc = {"uid": "u2", "summary": "Event", "start_time": "2099-01-01T10:00:00", "end_time": "2099-01-01T11:00:00", "description": "old-desc", "location": "L"}
+
+    def find_side(query=None, projection=None):
+        if isinstance(query, dict) and "uid" in query and "$in" in query["uid"]:
+            return [stored_doc]
+        if query == {} and projection == {"uid": 1}:
+            return [{"uid": "u2"}]
+        return []
+
+    mock_collection.find.side_effect = lambda *args, **kwargs: find_side(*args, **kwargs)
+    mock_collection.update_one = MagicMock()
+
+    mock_db = {config.MONGO_COLLECTION: mock_collection}
+    mock_client = MagicMock()
+    mock_client.__getitem__.return_value = mock_db
+    mock_mongo_client.return_value = mock_client
+
+    # fetched event has same times but updated description
+    class FakeFetcher:
+        def __init__(self, url):
+            pass
+
+        def fetch_events(self):
+            return [{"uid": "u2", "summary": "Event", "dtstart": "2099-01-01T10:00:00", "dtend": "2099-01-01T11:00:00", "description": "new-desc", "location": "L"}]
+
+    fake_sender_cls = MagicMock()
+    fake_sender_instance = MagicMock()
+    fake_sender_cls.return_value = fake_sender_instance
+
+    es = EventService(config=config, email_sender_cls=fake_sender_cls, fetcher_cls=FakeFetcher)
+
+    out = es.fetch_persist_and_send_events()
+
+    assert out == []
+    mock_collection.update_one.assert_called_once()
+    fake_sender_instance.send_email.assert_called_once()
+    sent = fake_sender_instance.send_email.call_args[0][2]
+    assert "Updated Events" in sent
+    assert "Old Description" in sent and "New Description" in sent
+
+
+@patch.object(es_module, 'MongoClient')
+def test_detect_and_apply_updates_location_change(mock_mongo_client):
+    """When only the location changes, it should be detected as an update."""
+    config = DummyConfig()
+
+    mock_collection = MagicMock()
+
+    stored_doc = {"uid": "u3", "summary": "Event", "start_time": "2099-01-01T10:00:00", "end_time": "2099-01-01T11:00:00", "description": "d", "location": "OldLoc"}
+
+    def find_side(query=None, projection=None):
+        if isinstance(query, dict) and "uid" in query and "$in" in query["uid"]:
+            return [stored_doc]
+        if query == {} and projection == {"uid": 1}:
+            return [{"uid": "u3"}]
+        return []
+
+    mock_collection.find.side_effect = lambda *args, **kwargs: find_side(*args, **kwargs)
+    mock_collection.update_one = MagicMock()
+
+    mock_db = {config.MONGO_COLLECTION: mock_collection}
+    mock_client = MagicMock()
+    mock_client.__getitem__.return_value = mock_db
+    mock_mongo_client.return_value = mock_client
+
+    # fetched event has same times but updated location
+    class FakeFetcher:
+        def __init__(self, url):
+            pass
+
+        def fetch_events(self):
+            return [{"uid": "u3", "summary": "Event", "dtstart": "2099-01-01T10:00:00", "dtend": "2099-01-01T11:00:00", "description": "d", "location": "NewLoc"}]
+
+    fake_sender_cls = MagicMock()
+    fake_sender_instance = MagicMock()
+    fake_sender_cls.return_value = fake_sender_instance
+
+    es = EventService(config=config, email_sender_cls=fake_sender_cls, fetcher_cls=FakeFetcher)
+
+    out = es.fetch_persist_and_send_events()
+
+    assert out == []
+    mock_collection.update_one.assert_called_once()
+    fake_sender_instance.send_email.assert_called_once()
+    sent = fake_sender_instance.send_email.call_args[0][2]
+    assert "Updated Events" in sent
+    assert "Old Location" in sent and "New Location" in sent
