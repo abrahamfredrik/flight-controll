@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 
-from app.event import notifier
+from flight_controll.event import notifier
 
 
 class DummyConfig:

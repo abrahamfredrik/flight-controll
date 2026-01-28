@@ -1,5 +1,5 @@
 from flask import Blueprint, current_app, jsonify
-from app.event.event_service import EventService
+from ..event.event_service import EventService
 
 def create_event_api_blueprint() -> Blueprint:
     event_api = Blueprint("event_api", __name__)

@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-from app.scheduler import scheduler as scheduler_module
+from flight_controll.scheduler import scheduler as scheduler_module
 
 
 class DummyApp:

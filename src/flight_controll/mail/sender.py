@@ -26,7 +26,7 @@ class EmailSender:
         self.username = username
         self.password = password
         # do not bind to smtplib.SMTP at construction time so tests that patch
-        # `app.mail.sender.smtplib.SMTP` before calling `send_email` continue to work
+        # `flight_controll.mail.sender.smtplib.SMTP` before calling `send_email` continue to work
         self.smtp_class = smtp_class
 
     def send_email(self, recipient: str, subject: str, body: str) -> None:

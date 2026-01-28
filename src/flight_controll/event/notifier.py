@@ -1,5 +1,5 @@
 from typing import List, Dict, Any
-from app.mail.sender import EmailSender
+from ..mail.sender import EmailSender
 
 
 def send_summary(email_sender_cls, config, added: List[Dict[str, Any]], removed: List[Dict[str, Any]], updated: List[Dict[str, Any]]):

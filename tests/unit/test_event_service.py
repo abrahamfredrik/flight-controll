@@ -2,8 +2,8 @@ import pytest
 from unittest.mock import MagicMock, patch
 from datetime import datetime, timedelta, timezone
 
-from app.event import event_service as es_module
-from app.event.event_service import EventService
+from flight_controll.event import event_service as es_module
+from flight_controll.event.event_service import EventService
 
 
 class DummyConfig:

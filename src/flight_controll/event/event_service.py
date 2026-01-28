@@ -1,12 +1,12 @@
 import logging
 from typing import List, Dict, Any, Optional, Set
 from datetime import datetime, timezone, timedelta
-from app.event import repository, notifier, utils
+from . import repository, notifier, utils
 
 from pymongo import MongoClient
-from app.webcal.fetcher import WebcalFetcher
-from app.mail.sender import EmailSender
-from app.config import Config
+from ..webcal.fetcher import WebcalFetcher
+from ..mail.sender import EmailSender
+from ..config import Config
 
 class EventService:
     """Service responsible for fetching events, persisting new ones and sending email.

@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from app.mail.sender import EmailSender
+from flight_controll.mail.sender import EmailSender
 
 @pytest.fixture
 def email_sender():
@@ -11,7 +11,7 @@ def email_sender():
         password="securepassword"
     )
 
-@patch("app.mail.sender.smtplib.SMTP")
+@patch("flight_controll.mail.sender.smtplib.SMTP")
 def test_send_email_success(mock_smtp, email_sender):
     mock_server = MagicMock()
     mock_smtp.return_value.__enter__.return_value = mock_server
@@ -24,7 +24,7 @@ def test_send_email_success(mock_smtp, email_sender):
     mock_server.send_message.assert_called_once()
     # You can further check the message contents if needed
 
-@patch("app.mail.sender.smtplib.SMTP")
+@patch("flight_controll.mail.sender.smtplib.SMTP")
 def test_send_email_failure(mock_smtp, email_sender, capsys):
     mock_smtp.side_effect = Exception("SMTP connection failed")
 

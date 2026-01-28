@@ -1,6 +1,6 @@
 import pytest
 
-from app.event.event_service import EventService
+from flight_controll.event.event_service import EventService
 
 
 class FakeCollection:

@@ -2,8 +2,8 @@ from flask import Flask
 from typing import Optional
 
 from .config import Config
-from app.rest import register_blueprints
-from app.scheduler.scheduler import init_scheduler
+from .rest import register_blueprints
+from .scheduler.scheduler import init_scheduler
 
 
 def create_app(config_object: Optional[object] = None, enable_scheduler: Optional[bool] = None):

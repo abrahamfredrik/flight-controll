@@ -1,6 +1,8 @@
 from flask_apscheduler import APScheduler
-from app.event.event_service import EventService, WebcalFetcher, EmailSender
-from app.config import Config
+from ..event.event_service import EventService
+from ..webcal.fetcher import WebcalFetcher
+from ..mail.sender import EmailSender
+from ..config import Config
 import logging
 
 logger = logging.getLogger(__name__)

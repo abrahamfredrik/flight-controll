@@ -1,4 +1,4 @@
-from app import create_app
+from flight_controll import create_app
 import sys
 import logging
 

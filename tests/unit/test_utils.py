@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import pytest
 
-from app.event import utils
+from flight_controll.event import utils
 
 
 def test_parse_dt_with_iso_string():

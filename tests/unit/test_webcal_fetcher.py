@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from datetime import datetime
 
-from app.webcal.fetcher import WebcalFetcher
+from flight_controll.webcal.fetcher import WebcalFetcher
 
 
 MOCK_ICAL_DATA = """BEGIN:VCALENDAR
@@ -26,7 +26,7 @@ END:VCALENDAR
 """
 
 
-@patch("app.webcal.fetcher.requests.get")
+@patch("flight_controll.webcal.fetcher.requests.get")
 def test_fetch_events_parses_correctly(mock_get):
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -45,7 +45,7 @@ def test_fetch_events_parses_correctly(mock_get):
     assert events[0]["dtend"] == datetime(2025, 10, 22, 11, 0)
 
 
-@patch("app.webcal.fetcher.requests.get")
+@patch("flight_controll.webcal.fetcher.requests.get")
 def test_fetch_events_skips_event_without_uid(mock_get):
     ical_data = """BEGIN:VCALENDAR
 BEGIN:VEVENT
@@ -66,7 +66,7 @@ END:VCALENDAR"""
     assert len(events) == 0
 
 
-@patch("app.webcal.fetcher.requests.get")
+@patch("flight_controll.webcal.fetcher.requests.get")
 def test_fetch_events_handles_malformed_dates(mock_get):
     ical_data = """BEGIN:VCALENDAR
 BEGIN:VEVENT
@@ -91,7 +91,7 @@ END:VCALENDAR"""
     assert events[0]["dtend"] == None
 
 
-@patch("app.webcal.fetcher.requests.get")
+@patch("flight_controll.webcal.fetcher.requests.get")
 def test_fetch_events_raises_for_bad_http(mock_get):
     mock_response = MagicMock()
     mock_response.raise_for_status.side_effect = Exception("404 Not Found")
@@ -103,7 +103,7 @@ def test_fetch_events_raises_for_bad_http(mock_get):
         fetcher.fetch_events()
 
 
-@patch("app.webcal.fetcher.requests.get")
+@patch("flight_controll.webcal.fetcher.requests.get")
 def test_fetch_events_parses_seconds_and_tzid(mock_get):
     ical_data = """BEGIN:VCALENDAR
 BEGIN:VEVENT

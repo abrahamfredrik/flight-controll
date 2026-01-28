@@ -21,6 +21,3 @@ class Config:
     MONGO_COLLECTION = os.environ.get("MONGO_COLLECTION")
     MONGO_USERNAME = os.environ.get("MONGO_USERNAME")
     MONGO_PASSWORD = os.environ.get("MONGO_PASSWORD")
-    
-    
-    

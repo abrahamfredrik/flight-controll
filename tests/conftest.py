@@ -4,7 +4,14 @@ import os
 import pytest
 from unittest.mock import MagicMock
 from flask import Flask
-from app import create_app
+import sys
+# ensure `src` is on path so tests can import the package at src/flight_controll
+ROOT = os.path.dirname(os.path.dirname(__file__))
+SRC = os.path.join(ROOT, "src")
+if SRC not in sys.path:
+    sys.path.insert(0, SRC)
+
+from flight_controll import create_app
 
 
 def pytest_sessionfinish(session, exitstatus):
