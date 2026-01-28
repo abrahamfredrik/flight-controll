@@ -290,21 +290,42 @@ def test_recent_removed_event_is_removed(mock_mongo_client):
 
 
 @patch.object(es_module, 'MongoClient')
-def test_detect_and_apply_updates(mock_mongo_client):
-    """When a fetched event has updated start/end, the DB should be updated and the summary email should include the change."""
+@pytest.mark.parametrize(
+    "case_name, stored_doc, fetched_event, expected_strings",
+    [
+        (
+            "time_change",
+            {"uid": "u1", "summary": "EventOld", "start_time": "2099-01-01T10:00:00", "end_time": "2099-01-01T11:00:00", "description": "d", "location": "L"},
+            {"uid": "u1", "summary": "EventOld", "dtstart": "2099-01-02T10:00:00", "dtend": "2099-01-02T11:00:00", "description": "d", "location": "L"},
+            ["Old Start", "New Start"],
+        ),
+        (
+            "description_change",
+            {"uid": "u2", "summary": "Event", "start_time": "2099-01-01T10:00:00", "end_time": "2099-01-01T11:00:00", "description": "old-desc", "location": "L"},
+            {"uid": "u2", "summary": "Event", "dtstart": "2099-01-01T10:00:00", "dtend": "2099-01-01T11:00:00", "description": "new-desc", "location": "L"},
+            ["Old Description", "New Description"],
+        ),
+        (
+            "location_change",
+            {"uid": "u3", "summary": "Event", "start_time": "2099-01-01T10:00:00", "end_time": "2099-01-01T11:00:00", "description": "d", "location": "OldLoc"},
+            {"uid": "u3", "summary": "Event", "dtstart": "2099-01-01T10:00:00", "dtend": "2099-01-01T11:00:00", "description": "d", "location": "NewLoc"},
+            ["Old Location", "New Location"],
+        ),
+    ],
+)
+def test_detect_and_apply_updates_param(mock_mongo_client, case_name, stored_doc, fetched_event, expected_strings):
+    """Parametrized test for update detection: time, description, and location changes."""
     config = DummyConfig()
 
     mock_collection = MagicMock()
 
-    stored_doc = {"uid": "u1", "summary": "EventOld", "start_time": "2099-01-01T10:00:00", "end_time": "2099-01-01T11:00:00", "description": "d", "location": "L"}
+    uid = stored_doc["uid"]
 
     def find_side(query=None, projection=None):
-        # matching uids query
         if isinstance(query, dict) and "uid" in query and "$in" in query["uid"]:
-            # return stored_doc when asked for uids
             return [stored_doc]
         if query == {} and projection == {"uid": 1}:
-            return [{"uid": "u1"}]
+            return [{"uid": uid}]
         return []
 
     mock_collection.find.side_effect = lambda *args, **kwargs: find_side(*args, **kwargs)
@@ -315,66 +336,12 @@ def test_detect_and_apply_updates(mock_mongo_client):
     mock_client.__getitem__.return_value = mock_db
     mock_mongo_client.return_value = mock_client
 
-    # Fake fetcher returns the same uid but with updated times
     class FakeFetcher:
         def __init__(self, url):
             pass
 
         def fetch_events(self):
-            return [{"uid": "u1", "summary": "EventOld", "dtstart": "2099-01-02T10:00:00", "dtend": "2099-01-02T11:00:00", "description": "d", "location": "L"}]
-
-    fake_sender_cls = MagicMock()
-    fake_sender_instance = MagicMock()
-    fake_sender_cls.return_value = fake_sender_instance
-
-    es = EventService(config=config, email_sender_cls=fake_sender_cls, fetcher_cls=FakeFetcher)
-
-    out = es.fetch_persist_and_send_events()
-
-    # no new events (was an update)
-    assert out == []
-
-    # update_one should have been called to apply new start/end
-    mock_collection.update_one.assert_called_once()
-
-    # summary email must include Updated Events section and show old/new starts
-    fake_sender_instance.send_email.assert_called_once()
-    sent = fake_sender_instance.send_email.call_args[0][2]
-    assert "Updated Events" in sent
-    assert "Old Start" in sent and "New Start" in sent
-
-
-@patch.object(es_module, 'MongoClient')
-def test_detect_and_apply_updates_description_change(mock_mongo_client):
-    """When only the description changes, it should be detected as an update."""
-    config = DummyConfig()
-
-    mock_collection = MagicMock()
-
-    stored_doc = {"uid": "u2", "summary": "Event", "start_time": "2099-01-01T10:00:00", "end_time": "2099-01-01T11:00:00", "description": "old-desc", "location": "L"}
-
-    def find_side(query=None, projection=None):
-        if isinstance(query, dict) and "uid" in query and "$in" in query["uid"]:
-            return [stored_doc]
-        if query == {} and projection == {"uid": 1}:
-            return [{"uid": "u2"}]
-        return []
-
-    mock_collection.find.side_effect = lambda *args, **kwargs: find_side(*args, **kwargs)
-    mock_collection.update_one = MagicMock()
-
-    mock_db = {config.MONGO_COLLECTION: mock_collection}
-    mock_client = MagicMock()
-    mock_client.__getitem__.return_value = mock_db
-    mock_mongo_client.return_value = mock_client
-
-    # fetched event has same times but updated description
-    class FakeFetcher:
-        def __init__(self, url):
-            pass
-
-        def fetch_events(self):
-            return [{"uid": "u2", "summary": "Event", "dtstart": "2099-01-01T10:00:00", "dtend": "2099-01-01T11:00:00", "description": "new-desc", "location": "L"}]
+            return [fetched_event]
 
     fake_sender_cls = MagicMock()
     fake_sender_instance = MagicMock()
@@ -389,52 +356,5 @@ def test_detect_and_apply_updates_description_change(mock_mongo_client):
     fake_sender_instance.send_email.assert_called_once()
     sent = fake_sender_instance.send_email.call_args[0][2]
     assert "Updated Events" in sent
-    assert "Old Description" in sent and "New Description" in sent
-
-
-@patch.object(es_module, 'MongoClient')
-def test_detect_and_apply_updates_location_change(mock_mongo_client):
-    """When only the location changes, it should be detected as an update."""
-    config = DummyConfig()
-
-    mock_collection = MagicMock()
-
-    stored_doc = {"uid": "u3", "summary": "Event", "start_time": "2099-01-01T10:00:00", "end_time": "2099-01-01T11:00:00", "description": "d", "location": "OldLoc"}
-
-    def find_side(query=None, projection=None):
-        if isinstance(query, dict) and "uid" in query and "$in" in query["uid"]:
-            return [stored_doc]
-        if query == {} and projection == {"uid": 1}:
-            return [{"uid": "u3"}]
-        return []
-
-    mock_collection.find.side_effect = lambda *args, **kwargs: find_side(*args, **kwargs)
-    mock_collection.update_one = MagicMock()
-
-    mock_db = {config.MONGO_COLLECTION: mock_collection}
-    mock_client = MagicMock()
-    mock_client.__getitem__.return_value = mock_db
-    mock_mongo_client.return_value = mock_client
-
-    # fetched event has same times but updated location
-    class FakeFetcher:
-        def __init__(self, url):
-            pass
-
-        def fetch_events(self):
-            return [{"uid": "u3", "summary": "Event", "dtstart": "2099-01-01T10:00:00", "dtend": "2099-01-01T11:00:00", "description": "d", "location": "NewLoc"}]
-
-    fake_sender_cls = MagicMock()
-    fake_sender_instance = MagicMock()
-    fake_sender_cls.return_value = fake_sender_instance
-
-    es = EventService(config=config, email_sender_cls=fake_sender_cls, fetcher_cls=FakeFetcher)
-
-    out = es.fetch_persist_and_send_events()
-
-    assert out == []
-    mock_collection.update_one.assert_called_once()
-    fake_sender_instance.send_email.assert_called_once()
-    sent = fake_sender_instance.send_email.call_args[0][2]
-    assert "Updated Events" in sent
-    assert "Old Location" in sent and "New Location" in sent
+    for s in expected_strings:
+        assert s in sent
