@@ -28,10 +28,10 @@ def test_send_email_success(mock_smtp, email_sender):
 
 
 @patch("flight_controll.mail.sender.smtplib.SMTP")
-def test_send_email_failure(mock_smtp, email_sender, capsys):
+def test_send_email_failure(mock_smtp, email_sender, caplog):
     mock_smtp.side_effect = Exception("SMTP connection failed")
 
     email_sender.send_email("recipient@example.com", "Test Subject", "Test Body")
 
-    captured = capsys.readouterr()
-    assert "Failed to send email: SMTP connection failed" in captured.out
+    assert "Failed to send email" in caplog.text
+    assert "SMTP connection failed" in caplog.text

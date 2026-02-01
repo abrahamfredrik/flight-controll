@@ -1,9 +1,11 @@
+"""Mongo-like persistence helpers for calendar events (find by uid, insert, update, delete)."""
 from typing import List, Dict, Any, Set, Optional
 
 
 def existing_matching_uids(
     events_collection: object, fetched_uids: Set[str]
 ) -> Set[str]:
+    """Return UIDs that exist in the collection and are in fetched_uids."""
     if not fetched_uids:
         return set()
     cursor = events_collection.find({"uid": {"$in": list(fetched_uids)}}, {"uid": 1})
@@ -12,6 +14,7 @@ def existing_matching_uids(
 
 
 def existing_all_uids(events_collection: object) -> Set[str]:
+    """Return all UIDs currently stored in the collection."""
     cursor = events_collection.find({}, {"uid": 1})
     existing_all = {doc["uid"] for doc in cursor}
     if not existing_all and hasattr(events_collection, "docs"):
@@ -22,6 +25,7 @@ def existing_all_uids(events_collection: object) -> Set[str]:
 def find_docs_by_uids(
     events_collection: object, uids: List[str]
 ) -> List[Dict[str, Any]]:
+    """Return full documents for the given UIDs."""
     if not uids:
         return []
     docs = list(events_collection.find({"uid": {"$in": uids}}))
@@ -41,6 +45,7 @@ def find_docs_by_uids(
 
 
 def delete_by_uids(events_collection: object, uids: List[str]) -> None:
+    """Delete documents whose uid is in uids."""
     if not uids:
         return
     events_collection.delete_many({"uid": {"$in": uids}})
@@ -49,6 +54,7 @@ def delete_by_uids(events_collection: object, uids: List[str]) -> None:
 def update_one(
     events_collection: object, uid: str, set_payload: Dict[str, Any]
 ) -> Optional[object]:
+    """Update one document by uid with the given $set payload."""
     try:
         return events_collection.update_one({"uid": uid}, {"$set": set_payload})
     except Exception:
@@ -57,6 +63,7 @@ def update_one(
 
 
 def insert_events(events_collection: object, events: List[Dict[str, Any]]) -> None:
+    """Insert event dicts as documents; skip any whose uid already exists."""
     for event_data in events:
         if not events_collection.find_one({"uid": event_data["uid"]}):
             doc = {

@@ -8,6 +8,7 @@ def send_summary(
     removed: List[Dict[str, Any]],
     updated: List[Dict[str, Any]],
 ):
+    """Send one summary email for added, removed, and updated events. Builds the sender from config internally."""
     if not added and not removed and not updated:
         return
 

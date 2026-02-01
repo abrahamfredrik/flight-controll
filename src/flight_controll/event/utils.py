@@ -1,6 +1,8 @@
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Any
 
+REMOVAL_WINDOW_HOURS = 10
+
 
 def parse_dt(v: Any) -> Optional[datetime]:
     if v is None:
@@ -21,8 +23,7 @@ def parse_dt(v: Any) -> Optional[datetime]:
 
 
 def removal_threshold_hours() -> int:
-    # Keep hardcoded threshold here; make configurable later if desired
-    return 10
+    return REMOVAL_WINDOW_HOURS
 
 
 def threshold_datetime() -> datetime:

@@ -34,7 +34,7 @@ class DummyConfig:
     ],
 )
 def test_normalize_dtstamp(mock_mongo_client, text, expected):
-    """Unit tests for normalizeDtstamp: no DTSTAMP, DTSTAMP lines removed, empty, None."""
+    """Unit tests for normalize_dtstamp: no DTSTAMP, DTSTAMP lines removed, empty, None."""
     config = DummyConfig()
     es = EventService(
         config=config,
@@ -42,7 +42,7 @@ def test_normalize_dtstamp(mock_mongo_client, text, expected):
         fetcher_cls=MagicMock,
         events_collection=MagicMock(),
     )
-    assert es.normalizeDtstamp(text) == expected
+    assert es.normalize_dtstamp(text) == expected
 
 
 @patch.object(es_module, "MongoClient")

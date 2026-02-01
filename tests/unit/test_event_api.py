@@ -17,7 +17,7 @@ def test_fetch_endpoint_returns_filtered_events(mock_event_service, client):
     data = [{"uid": "1", "summary": "S", "dtstart": "d", "dtend": "e"}]
     mock_event_service.return_value = make_service_mock(return_events=data)
 
-    resp = client.post("/fetch")
+    resp = client.post("/events/fetch")
     assert resp.status_code == 200
     assert resp.get_json() == data
 
@@ -28,7 +28,7 @@ def test_fetch_persist_endpoint_stores_events(mock_event_service, client):
     inst = make_service_mock(return_events=data)
     mock_event_service.return_value = inst
 
-    resp = client.post("/fetch-persist")
+    resp = client.post("/events/fetch-persist")
     assert resp.status_code == 200
     assert resp.get_json() == data
     inst.store_events.assert_called_once()
@@ -40,7 +40,7 @@ def test_trigger_check_calls_fetch_persist_and_send(mock_event_service, client):
     inst = make_service_mock(return_events=data)
     mock_event_service.return_value = inst
 
-    resp = client.post("/trigger-check")
+    resp = client.post("/events/trigger-check")
     assert resp.status_code == 200
     assert resp.get_json() == data
     inst.fetch_persist_and_send_events.assert_called_once()

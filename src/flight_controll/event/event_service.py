@@ -9,6 +9,8 @@ from ..webcal.fetcher import WebcalFetcher
 from ..mail.sender import EmailSender
 from ..config import Config
 
+EXCLUDED_LOCATIONS = ["privat"]
+
 
 class EventService:
     """Service responsible for fetching events, persisting new ones and sending email.
@@ -49,31 +51,19 @@ class EventService:
         self.events_collection = self.db[self.config.MONGO_COLLECTION]
 
     def store_events(self, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        for event_data in events:
-            if not self.events_collection.find_one({"uid": event_data["uid"]}):
-                doc = {
-                    "uid": event_data["uid"],
-                    "summary": event_data["summary"],
-                    "start_time": event_data["dtstart"],
-                    "end_time": event_data["dtend"],
-                    "description": event_data.get("description"),
-                    "location": event_data.get("location"),
-                }
-                self.events_collection.insert_one(doc)
+        repository.insert_events(self.events_collection, events)
         return events
 
     def fetch_events(self) -> List[Dict[str, Any]]:
         fetcher: WebcalFetcher = self.fetcher_cls(self.config.WEB_CAL_URL)
         events = fetcher.fetch_events()
-        # List of locations to filter out (case-insensitive)
-        excluded_locations = ["privat"]
-        excluded_locations = [loc.lower() for loc in excluded_locations]
+        excluded_lower = [loc.lower() for loc in EXCLUDED_LOCATIONS]
         filtered_events = [
             event
             for event in events
             if not (
                 event.get("location")
-                and event["location"].strip().lower() in excluded_locations
+                and event["location"].strip().lower() in excluded_lower
             )
         ]
         return filtered_events
@@ -128,6 +118,36 @@ class EventService:
     def _parse_dt(self, v: Any) -> Optional[datetime]:
         return utils.parse_dt(v)
 
+    def _event_changed(
+        self,
+        old_start: Optional[datetime],
+        old_end: Optional[datetime],
+        new_start: Optional[datetime],
+        new_end: Optional[datetime],
+        old_desc: Optional[str],
+        new_desc: Optional[str],
+        old_loc: Optional[str],
+        new_loc: Optional[str],
+    ) -> bool:
+        """Return True if start, end, description, or location differ (None-safe)."""
+        if (old_start is None) != (new_start is None):
+            return True
+        if (
+            old_start is not None
+            and new_start is not None
+            and old_start != new_start
+        ):
+            return True
+        if (old_end is None) != (new_end is None):
+            return True
+        if old_end is not None and new_end is not None and old_end != new_end:
+            return True
+        if self.normalize_dtstamp(old_desc) != self.normalize_dtstamp(new_desc):
+            return True
+        if (old_loc or "") != (new_loc or ""):
+            return True
+        return False
+
     def _detect_and_apply_updates(
         self, events: List[Dict[str, Any]], existing_matching: Set[str]
     ) -> List[Dict[str, Any]]:
@@ -143,7 +163,7 @@ class EventService:
         stored_cursor = repository.find_docs_by_uids(
             self.events_collection, list(existing_matching)
         )
-        # Some lightweight fake collections only return uid entries for `find`.
+        # Fake collections in tests may only expose full docs via .docs
         if (
             stored_cursor
             and all(
@@ -169,67 +189,48 @@ class EventService:
             old_end = utils.parse_dt(stored.get("end_time") or stored.get("dtend"))
             new_start = utils.parse_dt(ev.get("dtstart") or ev.get("start_time"))
             new_end = utils.parse_dt(ev.get("dtend") or ev.get("end_time"))
-
-            # consider updated if start or end differ (None-safe)
-            changed = False
-            if (old_start is None) != (new_start is None):
-                changed = True
-            elif (
-                old_start is not None
-                and new_start is not None
-                and old_start != new_start
-            ):
-                changed = True
-
-            if (old_end is None) != (new_end is None):
-                changed = True
-            elif old_end is not None and new_end is not None and old_end != new_end:
-                changed = True
-
-            # consider description/location changed (None-safe string compare)
             old_desc = stored.get("description")
             new_desc = ev.get("description")
-            if self.normalizeDtstamp(old_desc) != self.normalizeDtstamp(new_desc):
-                changed = True
-
             old_loc = stored.get("location")
             new_loc = ev.get("location")
-            if (old_loc or "") != (new_loc or ""):
-                changed = True
 
-            if changed:
-                # prepare update payload (store as ISO strings if present)
-                set_payload: Dict[str, Any] = {}
-                if new_start is not None:
-                    set_payload["start_time"] = new_start.isoformat()
-                if new_end is not None:
-                    set_payload["end_time"] = new_end.isoformat()
-                # also update summary/description/location in case they changed
-                for k in ("summary", "description", "location"):
-                    if k in ev:
-                        set_payload[k] = ev[k]
+            if not self._event_changed(
+                old_start, old_end, new_start, new_end,
+                old_desc, new_desc, old_loc, new_loc,
+            ):
+                continue
 
-                if set_payload:
-                    repository.update_one(self.events_collection, uid, set_payload)
+            # prepare update payload (store as ISO strings if present)
+            set_payload: Dict[str, Any] = {}
+            if new_start is not None:
+                set_payload["start_time"] = new_start.isoformat()
+            if new_end is not None:
+                set_payload["end_time"] = new_end.isoformat()
+            for k in ("summary", "description", "location"):
+                if k in ev:
+                    set_payload[k] = ev[k]
 
-                updates.append(
-                    {
-                        "uid": uid,
-                        "summary": ev.get("summary", stored.get("summary")),
-                        "old_description": old_desc,
-                        "new_description": new_desc,
-                        "old_location": old_loc,
-                        "new_location": new_loc,
-                        "old_start": (
-                            old_start.isoformat() if old_start is not None else None
-                        ),
-                        "old_end": old_end.isoformat() if old_end is not None else None,
-                        "new_start": (
-                            new_start.isoformat() if new_start is not None else None
-                        ),
-                        "new_end": new_end.isoformat() if new_end is not None else None,
-                    }
-                )
+            if set_payload:
+                repository.update_one(self.events_collection, uid, set_payload)
+
+            updates.append(
+                {
+                    "uid": uid,
+                    "summary": ev.get("summary", stored.get("summary")),
+                    "old_description": old_desc,
+                    "new_description": new_desc,
+                    "old_location": old_loc,
+                    "new_location": new_loc,
+                    "old_start": (
+                        old_start.isoformat() if old_start is not None else None
+                    ),
+                    "old_end": old_end.isoformat() if old_end is not None else None,
+                    "new_start": (
+                        new_start.isoformat() if new_start is not None else None
+                    ),
+                    "new_end": new_end.isoformat() if new_end is not None else None,
+                }
+            )
 
         return updates
 
@@ -311,7 +312,7 @@ class EventService:
         # Return list of processed new events for backward compatibility
         return new_events
     
-    def normalizeDtstamp(self, text: Optional[str]) -> str:
+    def normalize_dtstamp(self, text: Optional[str]) -> str:
         if text is None:
             return ""
         # Remove the entire DTSTAMP line (including trailing spaces/newline)

@@ -41,10 +41,11 @@ Notes: the Dockerfile sets `PYTHONPATH=/app/src` so the `src/flight_controll` pa
 
 Interacting with the service
 
-- HTTP API: The app exposes a Flask blueprint under `/events` (see `src/flight_controll/rest/event_api.py`) with endpoints used for manual triggers and health checks. Example:
+- HTTP API: The app exposes a Flask blueprint under `/events` (see `src/flight_controll/rest/event_api.py`) with endpoints used for manual triggers and health checks:
 
-	- `GET /events` – list persisted events (for debugging)
-	- `POST /events/fetch` – trigger an immediate fetch/persist/notify cycle
+	- `POST /events/trigger-check` – fetch events, persist new ones, detect add/remove/update, send summary email
+	- `POST /events/fetch` – fetch events and return only those not yet stored (no persist)
+	- `POST /events/fetch-persist` – fetch events, filter to new only, persist them (no email)
 
 - Scheduler: The app registers a background scheduler job to fetch events periodically (interval configurable in `flight_controll.config`).
 

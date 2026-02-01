@@ -47,14 +47,5 @@ class EmailSender:
                     server.login(self.username, self.password)
                 server.send_message(msg)
             logger.info("Email sent to %s", recipient)
-            print(f"Email sent to {recipient}")
-        except Exception:
-            import sys
-
-            e = sys.exc_info()[1]
-            logger.exception("Failed to send email to %s", recipient)
-            # keep previous behaviour of printing the error for backwards compatibility
-            try:
-                print(f"Failed to send email: {e}")
-            except Exception:
-                pass
+        except Exception as e:
+            logger.exception("Failed to send email to %s: %s", recipient, e)

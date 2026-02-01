@@ -1,3 +1,9 @@
+"""Application configuration from environment variables.
+
+Main env vars: SCHEDULER_ENABLED, SMTP_SERVER, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD,
+RECIPIENT_EMAIL, WEB_CAL_URL, WEBCAL_SCHEDULER_DELAY_MINUTES, MONGO_HOST, MONGO_DB,
+MONGO_COLLECTION, MONGO_USERNAME, MONGO_PASSWORD.
+"""
 import os
 
 
@@ -6,7 +12,7 @@ def str_to_bool(val: str) -> bool:
 
 
 class Config:
-    SCHEDULER_ENABLED = str_to_bool(os.getenv("SCHEDULER_ENABLED", "True"))
+    SCHEDULER_ENABLED = str_to_bool(os.environ.get("SCHEDULER_ENABLED", "True"))
 
     SMTP_SERVER = os.environ.get("SMTP_SERVER")
     SMTP_PORT: int = int(os.environ.get("SMTP_PORT", 587))
