@@ -21,6 +21,31 @@ class DummyConfig:
 
 
 @patch.object(es_module, "MongoClient")
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Some text", "Some text"),
+        ("DTSTAMP:20250101T120000Z\n", ""),
+        ("Prefix\nDTSTAMP:20250101T120000Z\nSuffix", "Prefix\nSuffix"),
+        ("Line1\nDTSTAMP:20250101T120000Z\nLine2", "Line1\nLine2"),
+        ("", ""),
+        ("   ", ""),
+        (None, ""),
+    ],
+)
+def test_normalize_dtstamp(mock_mongo_client, text, expected):
+    """Unit tests for normalizeDtstamp: no DTSTAMP, DTSTAMP lines removed, empty, None."""
+    config = DummyConfig()
+    es = EventService(
+        config=config,
+        email_sender_cls=MagicMock,
+        fetcher_cls=MagicMock,
+        events_collection=MagicMock(),
+    )
+    assert es.normalizeDtstamp(text) == expected
+
+
+@patch.object(es_module, "MongoClient")
 def test_store_events_inserts_only_new(
     mock_mongo_client, fake_collection, fake_sender_cls
 ):
@@ -411,6 +436,26 @@ def test_recent_removed_event_is_removed(mock_mongo_client):
             },
             ["Old Location", "New Location"],
         ),
+        (
+            "description_change_with_dtstamp",
+            {
+                "uid": "u4",
+                "summary": "Event",
+                "start_time": "2099-01-01T10:00:00",
+                "end_time": "2099-01-01T11:00:00",
+                "description": "Old text",
+                "location": "L",
+            },
+            {
+                "uid": "u4",
+                "summary": "Event",
+                "dtstart": "2099-01-01T10:00:00",
+                "dtend": "2099-01-01T11:00:00",
+                "description": "New text\nDTSTAMP:20250101T120000Z",
+                "location": "L",
+            },
+            ["Old Description", "New Description"],
+        ),
     ],
 )
 def test_detect_and_apply_updates_param(
@@ -464,3 +509,64 @@ def test_detect_and_apply_updates_param(
     assert "Updated Events" in sent
     for s in expected_strings:
         assert s in sent
+
+
+@patch.object(es_module, "MongoClient")
+def test_description_only_dtstamp_difference_not_considered_update(mock_mongo_client):
+    """When description differs only by a DTSTAMP line, no update is performed."""
+    config = DummyConfig()
+
+    stored_doc = {
+        "uid": "u-dtstamp",
+        "summary": "Event",
+        "start_time": "2099-01-01T10:00:00",
+        "end_time": "2099-01-01T11:00:00",
+        "description": "Summary of event",
+        "location": "L",
+    }
+    fetched_event = {
+        "uid": "u-dtstamp",
+        "summary": "Event",
+        "dtstart": "2099-01-01T10:00:00",
+        "dtend": "2099-01-01T11:00:00",
+        "description": "Summary of event\nDTSTAMP:20250101T120000Z",
+        "location": "L",
+    }
+
+    mock_collection = MagicMock()
+
+    def find_side(query=None, projection=None):
+        if isinstance(query, dict) and "uid" in query and "$in" in query["uid"]:
+            return [stored_doc]
+        if query == {} and projection == {"uid": 1}:
+            return [{"uid": "u-dtstamp"}]
+        return []
+
+    mock_collection.find.side_effect = lambda *args, **kwargs: find_side(
+        *args, **kwargs
+    )
+    mock_collection.update_one = MagicMock()
+
+    mock_db = {config.MONGO_COLLECTION: mock_collection}
+    mock_client = MagicMock()
+    mock_client.__getitem__.return_value = mock_db
+    mock_mongo_client.return_value = mock_client
+
+    class FakeFetcher:
+        def __init__(self, url):
+            pass
+
+        def fetch_events(self):
+            return [fetched_event]
+
+    fake_sender_cls = MagicMock()
+    fake_sender_instance = MagicMock()
+    fake_sender_cls.return_value = fake_sender_instance
+
+    es = EventService(
+        config=config, email_sender_cls=fake_sender_cls, fetcher_cls=FakeFetcher
+    )
+
+    es.fetch_persist_and_send_events()
+
+    mock_collection.update_one.assert_not_called()

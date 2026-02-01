@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import List, Dict, Any, Optional, Set
 from datetime import datetime
 from . import repository, notifier, utils
@@ -188,7 +189,7 @@ class EventService:
             # consider description/location changed (None-safe string compare)
             old_desc = stored.get("description")
             new_desc = ev.get("description")
-            if (old_desc or "") != (new_desc or ""):
+            if self.normalizeDtstamp(old_desc) != self.normalizeDtstamp(new_desc):
                 changed = True
 
             old_loc = stored.get("location")
@@ -309,3 +310,11 @@ class EventService:
 
         # Return list of processed new events for backward compatibility
         return new_events
+    
+    def normalizeDtstamp(self, text: Optional[str]) -> str:
+        if text is None:
+            return ""
+        # Remove the entire DTSTAMP line (including trailing spaces/newline)
+        newText = re.sub(r"DTSTAMP:[^\n]*\n?", "", text)
+        # Optional: also normalize whitespace
+        return newText.strip()
