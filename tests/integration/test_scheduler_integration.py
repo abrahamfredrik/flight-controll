@@ -79,8 +79,13 @@ class FakeEmailSender:
     def __init__(self, smtp_server, smtp_port, username, password):
         pass
 
-    def send_email(self, recipient, subject, body):
-        self.sent.append({"recipient": recipient, "subject": subject, "body": body})
+    def send_email(self, recipient, subject, body, html_body=None):
+        self.sent.append({
+            "recipient": recipient,
+            "subject": subject,
+            "body": body,
+            "html_body": html_body,
+        })
 
 
 def test_scheduler_flow_sends_email_for_new_event(app):

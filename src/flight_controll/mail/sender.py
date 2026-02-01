@@ -29,13 +29,25 @@ class EmailSender:
         # `flight_controll.mail.sender.smtplib.SMTP` before calling `send_email` continue to work
         self.smtp_class = smtp_class
 
-    def send_email(self, recipient: str, subject: str, body: str) -> None:
+    def send_email(
+        self,
+        recipient: str,
+        subject: str,
+        body: str,
+        html_body: Optional[str] = None,
+    ) -> None:
         msg = MIMEMultipart()
         msg["From"] = self.username
         msg["To"] = recipient
         msg["Subject"] = subject
 
-        msg.attach(MIMEText(body, "plain"))
+        if html_body is None:
+            msg.attach(MIMEText(body, "plain"))
+        else:
+            alternative = MIMEMultipart("alternative")
+            alternative.attach(MIMEText(body, "plain"))
+            alternative.attach(MIMEText(html_body, "html"))
+            msg.attach(alternative)
 
         try:
             smtp_cls = self.smtp_class or smtplib.SMTP
