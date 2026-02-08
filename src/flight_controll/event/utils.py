@@ -22,12 +22,8 @@ def parse_dt(v: Any) -> Optional[datetime]:
     return dt
 
 
-def removal_threshold_hours() -> int:
-    return REMOVAL_WINDOW_HOURS
-
-
 def threshold_datetime() -> datetime:
-    return datetime.now(timezone.utc) - timedelta(hours=removal_threshold_hours())
+    return datetime.now(timezone.utc) - timedelta(hours=REMOVAL_WINDOW_HOURS)
 
 
 def is_within_removal_window(dt: datetime) -> bool:
