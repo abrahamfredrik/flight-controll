@@ -2,11 +2,12 @@ import logging
 import re
 from typing import List, Dict, Any, Optional, Set
 from datetime import datetime
+import time
 from . import repository, notifier, utils
 
 from pymongo import MongoClient
 from ..webcal.fetcher import WebcalFetcher
-from ..mail.sender import EmailSender
+from ..mail.sender import MailService
 from ..config import Config
 
 EXCLUDED_LOCATIONS = ["privat"]
@@ -24,7 +25,7 @@ class EventService:
     def __init__(
         self,
         config: Config,
-        email_sender_cls=EmailSender,
+        email_sender_cls=MailService,
         fetcher_cls=WebcalFetcher,
         mongo_client: Optional[MongoClient] = None,
         events_collection: Optional[object] = None,
@@ -51,10 +52,24 @@ class EventService:
         self.events_collection = self.db[self.config.MONGO_COLLECTION]
 
     def store_events(self, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Persist new event dicts to the events collection.
+
+        Args:
+            events: list of event dictionaries as returned by the fetcher.
+
+        Returns:
+            The same list of events that were passed in.
+        """
         repository.insert_events(self.events_collection, events)
         return events
 
     def fetch_events(self) -> List[Dict[str, Any]]:
+        """Fetch events from the external calendar provider and filter them.
+
+        Returns:
+            A list of event dictionaries. Events from excluded locations are
+            filtered out.
+        """
         fetcher: WebcalFetcher = self.fetcher_cls(self.config.WEB_CAL_URL)
         events = fetcher.fetch_events()
         excluded_lower = [loc.lower() for loc in EXCLUDED_LOCATIONS]
@@ -69,6 +84,12 @@ class EventService:
         return filtered_events
 
     def send_events_email(self, events: List[Dict[str, Any]]) -> None:
+        """Send one plain-text email describing the provided events.
+
+        Args:
+            events: list of event dicts to include in the email. If empty,
+                the function is a no-op.
+        """
         if not events:
             return
         email_sender = self.email_sender_cls(
@@ -94,8 +115,12 @@ class EventService:
         self,
         added_events: List[Dict[str, Any]],
         removed_events: List[Dict[str, Any]],
-        updated_events: List[Dict[str, Any]] = None,
+        updated_events: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
+        """Send a single summary email covering added, removed and updated events.
+
+        Delegates to the `notifier` module which builds the HTML/plain bodies.
+        """
         notifier.send_summary(
             self.email_sender_cls,
             self.config,
@@ -274,18 +299,23 @@ class EventService:
         return future_docs
 
     def fetch_persist_and_send_events(self) -> List[Dict[str, Any]]:
+        start_ts = time.monotonic()
+        if self.logger:
+            self.logger.info("fetch_persist_and_send_events.start", extra={"action": "fetch_start"})
+
         # fetch remote events
         events = self.fetch_events()
-
+        fetched_count = len(events)
         fetched_uids = {event["uid"] for event in events}
+        if self.logger:
+            self.logger.info("fetch_persist_and_send_events.fetched", extra={"fetched_count": fetched_count})
 
         # Which fetched uids already exist in DB?
         existing_matching = self._existing_matching_uids(fetched_uids)
 
         # New events are those fetched but not present in DB
-        new_events = [
-            event for event in events if event["uid"] not in existing_matching
-        ]
+        new_events = [event for event in events if event["uid"] not in existing_matching]
+        new_count = len(new_events)
 
         # Determine all uids present in DB (used to compute removals)
         existing_all = self._existing_all_uids()
@@ -294,20 +324,44 @@ class EventService:
         # use that information to recompute matching/new sets (guard for fakes)
         if not existing_matching and (fetched_uids & existing_all):
             existing_matching = fetched_uids & existing_all
-            new_events = [
-                event for event in events if event["uid"] not in existing_matching
-            ]
+            new_events = [event for event in events if event["uid"] not in existing_matching]
+            new_count = len(new_events)
 
         # Detect and apply updates for events that still exist but changed
         updated_events = self._detect_and_apply_updates(events, existing_matching)
+        updated_count = len(updated_events)
 
         # Find and remove events that existed previously but are no longer fetched
         removed_events = self._fetch_and_remove_events(existing_all, fetched_uids)
+        removed_count = len(removed_events)
 
         # persist new events and send a single summary email for added/removed/updated
         if new_events:
             self.store_events(new_events)
-        self.send_summary_email(new_events, removed_events, updated_events)
+
+        # send summary
+        try:
+            self.send_summary_email(new_events, removed_events, updated_events)
+            email_status = "sent"
+        except Exception as e:
+            if self.logger:
+                self.logger.exception("Failed to send summary email: %s", e)
+            email_status = "failed"
+
+        duration = time.monotonic() - start_ts
+        # Structured summary log of the run
+        if self.logger:
+            self.logger.info(
+                "fetch_persist_and_send_events.complete",
+                extra={
+                    "duration_seconds": duration,
+                    "fetched_count": fetched_count,
+                    "new_count": new_count,
+                    "updated_count": updated_count,
+                    "removed_count": removed_count,
+                    "email_status": email_status,
+                },
+            )
 
         # Return list of processed new events for backward compatibility
         return new_events

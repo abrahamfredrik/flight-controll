@@ -7,7 +7,13 @@ def create_event_api_blueprint() -> Blueprint:
 
     def get_event_service() -> EventService:
         config = current_app.app_config
-        return EventService(config=config)
+        # Prefer app-provided events collection when present (initialized by extensions).
+        events_collection = None
+        try:
+            events_collection = current_app.extensions.get("events_collection")
+        except Exception:
+            events_collection = None
+        return EventService(config=config, events_collection=events_collection)
 
     @event_api.route("/trigger-check", methods=["POST"])
     def trigger_check() -> tuple:

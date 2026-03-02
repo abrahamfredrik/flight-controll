@@ -4,6 +4,7 @@ from typing import Optional
 from .config import Config
 from .rest import register_blueprints
 from .scheduler.scheduler import init_scheduler
+from .extensions import init_extensions
 
 
 def create_app(
@@ -29,6 +30,9 @@ def create_app(
         app.app_config = cfg()
     else:
         app.app_config = cfg
+
+    # initialize long-lived extensions (Mongo client, collections, etc.)
+    init_extensions(app)
 
     register_blueprints(app)
 

@@ -1,13 +1,34 @@
+"""Minimal iCalendar (webcal) fetcher.
+
+This module provides a small parser that extracts VEVENT blocks and returns a
+list of plain dictionaries. It's intentionally lightweight to keep tests fast
+and avoid external heavy dependencies. Returned event dictionaries include the
+keys: `uid`, `dtstart`, `dtend`, `summary`, `location`, `description`.
+"""
+
+from typing import List, Dict, Any, Optional
+
 import requests
 import re
 from datetime import datetime
 
 
 class WebcalFetcher:
+    """Fetch and parse a remote iCalendar (.ics) feed.
+
+    Args:
+        webcal_url: the HTTP(S) URL of the calendar feed.
+    """
+
     def __init__(self, webcal_url: str):
         self.webcal_url = webcal_url
 
-    def fetch_events(self):
+    def fetch_events(self) -> List[Dict[str, Any]]:
+        """Return a list of event dicts parsed from the remote feed.
+
+        The parser is permissive and returns string values when date parsing
+        fails. No timezone conversion is performed by this implementation.
+        """
         # Fetch the webcal (iCal) data
         response = requests.get(self.webcal_url)
         response.raise_for_status()
@@ -17,7 +38,7 @@ class WebcalFetcher:
         events = []
         vevents = re.findall(r"BEGIN:VEVENT(.*?)END:VEVENT", ical_data, re.DOTALL)
         for vevent in vevents:
-            event = {}
+            event: Dict[str, Optional[Any]] = {}
             # Extract fields using regex
             uid = re.search(r"UID:(.+)", vevent)
             dtstart = re.search(r"DTSTART(?:;TZID=[^:]+)?:([0-9T]+)", vevent)
