@@ -62,6 +62,32 @@ def init_extensions(app: Flask) -> None:
         app.extensions = getattr(app, "extensions", {})
         app.extensions["mongo_client"] = client
         app.extensions["events_collection"] = events_collection
+        # provide a factory to create configured EventService instances so
+        # callers (scheduler, blueprints) don't construct Mongo clients directly
+        try:
+            from .event.event_service import EventService
+            from .webcal.fetcher import WebcalFetcher
+            from .mail.sender import MailService
+
+            def make_event_service(
+                cfg=None,
+                fetcher_cls: type = WebcalFetcher,
+                email_sender_cls: type = MailService,
+                events_collection_override: Optional[object] = None,
+            ) -> EventService:
+                config_obj = cfg or getattr(app, "app_config")
+                coll = events_collection_override or events_collection
+                return EventService(
+                    config=config_obj,
+                    fetcher_cls=fetcher_cls,
+                    email_sender_cls=email_sender_cls,
+                    events_collection=coll,
+                )
+
+            app.extensions["make_event_service"] = make_event_service
+        except Exception:
+            # don't fail if imports aren't available in some test environments
+            app.extensions["make_event_service"] = None
         logger.info("Mongo client and events collection attached to app.extensions")
     except Exception:
         logger.exception("Failed to initialize Mongo client; continuing without DB")

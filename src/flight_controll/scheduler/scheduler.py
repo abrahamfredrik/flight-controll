@@ -19,21 +19,29 @@ def init_scheduler(app):
     )
     def webcal_check():
         logger.info("Running scheduled task: webcal_check", extra={"task": "webcal_check", "phase": "start"})
-        # Prefer an injected collection when available to avoid creating new
-        # network clients during scheduled runs (enables easier testing and
-        # deterministic behaviour).
-        events_collection = None
+        # Prefer an injected factory when available so scheduler does not
+        # construct service instances or clients directly.
+        make_event_service = None
         try:
-            events_collection = app.extensions.get("events_collection")
+            make_event_service = app.extensions.get("make_event_service")
         except Exception:
-            events_collection = None
+            make_event_service = None
 
-        event_service = EventService(
-            config=app.app_config,
-            fetcher_cls=WebcalFetcher,
-            email_sender_cls=MailService,
-            events_collection=events_collection,
-        )
+        if make_event_service:
+            event_service = make_event_service(cfg=app.app_config)
+        else:
+            # fallback: construct EventService directly
+            events_collection = None
+            try:
+                events_collection = app.extensions.get("events_collection")
+            except Exception:
+                events_collection = None
+            event_service = EventService(
+                config=app.app_config,
+                fetcher_cls=WebcalFetcher,
+                email_sender_cls=MailService,
+                events_collection=events_collection,
+            )
         try:
             events = event_service.fetch_persist_and_send_events()
             logger.info(
