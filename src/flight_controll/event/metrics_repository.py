@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, Dict
-from .models.metrics import RunMetrics
+from ..models.metrics import RunMetrics
 
 class MetricsRepository:
     """Repository for persisting run metrics to MongoDB."""

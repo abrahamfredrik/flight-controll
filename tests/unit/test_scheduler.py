@@ -10,6 +10,7 @@ class DummyApp:
 
         self.app_config = Cfg()
         self.config = {}
+        self.extensions = {}
 
 
 @patch.object(scheduler_module, "scheduler")
