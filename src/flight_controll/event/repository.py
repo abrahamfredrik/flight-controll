@@ -1,8 +1,7 @@
 """Repository layer for calendar events.
 
 This module provides an `EventRepository` class that encapsulates MongoDB
-operations for events and a set of legacy function wrappers for backward
-compatibility with existing code.
+operations for events.
 """
 from __future__ import annotations
 
@@ -102,25 +101,6 @@ def create_indexes(events_collection: object) -> None:
 
 
 # Legacy function wrappers to preserve existing module-level API
-def existing_matching_uids(events_collection: object, fetched_uids: Set[str]) -> Set[str]:
-    return EventRepository(events_collection).existing_matching_uids(fetched_uids)
-
-
-def existing_all_uids(events_collection: object) -> Set[str]:
-    return EventRepository(events_collection).existing_all_uids()
-
-
-def find_docs_by_uids(events_collection: object, uids: List[str]) -> List[Dict[str, Any]]:
-    return EventRepository(events_collection).find_docs_by_uids(uids)
-
-
-def delete_by_uids(events_collection: object, uids: List[str]) -> None:
-    return EventRepository(events_collection).delete_by_uids(uids)
-
-
-def update_one(events_collection: object, uid: str, set_payload: Dict[str, Any]) -> Optional[object]:
-    return EventRepository(events_collection).update_one(uid, set_payload)
-
-
-def insert_events(events_collection: object, events: List[Dict[str, Any]]) -> None:
-    return EventRepository(events_collection).insert_events(events)
+# Legacy module-level wrappers were removed. Use `EventRepository`
+# instances directly for database operations (preferred) or create
+# thin adapters in call-sites if backward compatibility is required.
