@@ -43,7 +43,7 @@ def init_scheduler(app):
         from datetime import datetime, timezone
 
         metrics_collection = app.extensions.get("metrics_collection")
-        metrics_repo = MetricsRepository(metrics_collection) if metrics_collection else None
+        metrics_repo = MetricsRepository(metrics_collection) if metrics_collection is not None else None
 
         run_uuid = str(uuidlib.uuid4())
         start_time = datetime.now(timezone.utc)
