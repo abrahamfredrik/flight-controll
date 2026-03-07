@@ -29,20 +29,30 @@ class EventService:
         fetcher_cls=WebcalFetcher,
         mongo_client: Optional[MongoClient] = None,
         events_collection: Optional[object] = None,
+        repo: Optional[repository.EventRepository] = None,
     ):
         self.logger = logging.getLogger(__name__)
         self.config = config
         self.email_sender_cls = email_sender_cls
         self.fetcher_cls = fetcher_cls
+        # Repository injection: accept an EventRepository instance directly
+        if repo is not None:
+            self.repository = repo
+            # expose underlying collection for backward compatibility
+            self.events_collection = getattr(self.repository, "collection", None)
+            self.mongo_client = getattr(self.repository, "collection", None)
+            self.db = None
+            return
 
-        # allow tests to inject a fake collection directly
+        # allow tests to inject a fake collection directly; wrap it in repository
         if events_collection is not None:
             self.events_collection = events_collection
             self.mongo_client = mongo_client
             self.db = None
+            self.repository = repository.EventRepository(self.events_collection)
             return
 
-        # otherwise construct or use provided mongo_client
+        # otherwise construct or use provided mongo_client and create repository
         self.mongo_uri = (
             f"mongodb+srv://{self.config.MONGO_USERNAME}:{self.config.MONGO_PASSWORD}@"
             f"{self.config.MONGO_HOST}/{self.config.MONGO_DB}?retryWrites=true&w=majority"
@@ -50,6 +60,7 @@ class EventService:
         self.mongo_client = mongo_client or MongoClient(self.mongo_uri)
         self.db = self.mongo_client[self.config.MONGO_DB]
         self.events_collection = self.db[self.config.MONGO_COLLECTION]
+        self.repository = repository.EventRepository(self.events_collection)
 
     def store_events(self, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Persist new event dicts to the events collection.
@@ -60,8 +71,20 @@ class EventService:
         Returns:
             The same list of events that were passed in.
         """
-        repository.insert_events(self.events_collection, events)
+        # persist via repository
+        self.repository.insert_events(events)
         return events
+
+    def _ensure_repository(self) -> None:
+        """Ensure `self.repository` is available, creating it from
+        `self.events_collection` when necessary (supports tests that set
+        `events_collection` on instances created via `object.__new__`).
+        """
+        if not hasattr(self, "repository") or self.repository is None:
+            if hasattr(self, "events_collection") and self.events_collection is not None:
+                self.repository = repository.EventRepository(self.events_collection)
+            else:
+                raise RuntimeError("No repository or events_collection available on EventService")
 
     def fetch_events(self) -> List[Dict[str, Any]]:
         """Fetch events from the external calendar provider and filter them.
@@ -131,14 +154,12 @@ class EventService:
 
     def filter_new_events(self, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         uids = [event["uid"] for event in events]
-        existing_uids_cursor = self.events_collection.find(
-            {"uid": {"$in": uids}}, {"uid": 1}
-        )
+        existing_uids_cursor = self.repository.collection.find({"uid": {"$in": uids}}, {"uid": 1})
         existing_uids = {doc["uid"] for doc in existing_uids_cursor}
         return [event for event in events if event["uid"] not in existing_uids]
 
     def _existing_matching_uids(self, fetched_uids: Set[str]) -> Set[str]:
-        return repository.existing_matching_uids(self.events_collection, fetched_uids)
+        return self.repository.existing_matching_uids(fetched_uids)
 
     def _parse_dt(self, v: Any) -> Optional[datetime]:
         return utils.parse_dt(v)
@@ -185,9 +206,7 @@ class EventService:
             return []
 
         # retrieve stored documents for matching uids
-        stored_cursor = repository.find_docs_by_uids(
-            self.events_collection, list(existing_matching)
-        )
+        stored_cursor = self.repository.find_docs_by_uids(list(existing_matching))
         # Fake collections in tests may only expose full docs via .docs
         if (
             stored_cursor
@@ -236,7 +255,7 @@ class EventService:
                     set_payload[k] = ev[k]
 
             if set_payload:
-                repository.update_one(self.events_collection, uid, set_payload)
+                self.repository.update_one(uid, set_payload)
 
             updates.append(
                 {
@@ -265,7 +284,7 @@ class EventService:
         This prefers a normal `find({}, {"uid":1})` but falls back to a
         `docs` attribute (used by the lightweight FakeCollection in tests).
         """
-        return repository.existing_all_uids(self.events_collection)
+        return self.repository.existing_all_uids()
 
     def _fetch_and_remove_events(
         self, existing_all: Set[str], fetched_uids: Set[str]
@@ -282,7 +301,7 @@ class EventService:
             return removed_events
 
         # Retrieve stored docs for the removed uids
-        stored = repository.find_docs_by_uids(self.events_collection, removed_uids)
+        stored = self.repository.find_docs_by_uids(removed_uids)
 
         # Only consider events whose start time is within the allowed window.
         future_docs = []
@@ -294,11 +313,18 @@ class EventService:
         # delete only the future events from DB and return them for email
         if future_docs:
             future_uids = [d["uid"] for d in future_docs]
-            repository.delete_by_uids(self.events_collection, future_uids)
+            self.repository.delete_by_uids(future_uids)
 
         return future_docs
 
     def fetch_persist_and_send_events(self) -> List[Dict[str, Any]]:
+        # ensure repository is available for instances created without __init__
+        try:
+            self._ensure_repository()
+        except Exception:
+            # if repository cannot be ensured, allow original behavior to raise later
+            pass
+
         start_ts = time.monotonic()
         if self.logger:
             self.logger.info("fetch_persist_and_send_events.start", extra={"action": "fetch_start"})
