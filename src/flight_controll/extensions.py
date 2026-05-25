@@ -51,8 +51,6 @@ def init_extensions(app: Flask) -> None:
         client = MongoClient(mongo_uri)
         db = client[db_name]
         events_collection = db[coll_name]
-        # METRICS: create or get metrics collection (no index)
-        metrics_collection = db.get_collection("run_metrics")
         # attempt to create recommended indexes for the events collection
         try:
             from .event import repository as event_repository
@@ -63,7 +61,6 @@ def init_extensions(app: Flask) -> None:
         app.extensions = getattr(app, "extensions", {})
         app.extensions["mongo_client"] = client
         app.extensions["events_collection"] = events_collection
-        app.extensions["metrics_collection"] = metrics_collection
         # provide a factory to create configured EventService instances so
         # callers (scheduler, blueprints) don't construct Mongo clients directly
         try:
@@ -90,6 +87,6 @@ def init_extensions(app: Flask) -> None:
         except Exception:
             # don't fail if imports aren't available in some test environments
             app.extensions["make_event_service"] = None
-        logger.info("Mongo client, events, and metrics collections attached to app.extensions")
+        logger.info("Mongo client and events collection attached to app.extensions")
     except Exception:
         logger.exception("Failed to initialize Mongo client; continuing without DB")
