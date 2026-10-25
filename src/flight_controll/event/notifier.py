@@ -1,5 +1,15 @@
 import html as html_module
-from typing import Any, Dict, List, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
+
+
+@dataclass(frozen=True)
+class SummaryMessage:
+    """Rendered plain-text and HTML content for a calendar change summary."""
+
+    subject: str
+    body: str
+    html_body: str
 
 
 _SECTION_SEPARATOR = "--------------------------\n"
@@ -107,20 +117,15 @@ def _render_updated_event(updated: Dict[str, Any]) -> Tuple[str, str]:
     return "".join(plain_lines), "".join(html_lines)
 
 
-def send_summary(
-    email_sender_cls,
-    config,
+def render_summary(
     added: List[Dict[str, Any]],
     removed: List[Dict[str, Any]],
     updated: List[Dict[str, Any]],
-):
-    """Send one summary email for added, removed, and updated events."""
+) -> Optional[SummaryMessage]:
+    """Render one summary message for added, removed, and updated events."""
     if not added and not removed and not updated:
-        return
+        return None
 
-    email_sender = email_sender_cls(
-        config.SMTP_SERVER, config.SMTP_PORT, config.SMTP_USERNAME, config.SMTP_PASSWORD
-    )
     subject = f"Events update: {len(added)} added, {len(removed)} removed, {len(updated)} updated"
     body = ["Events Update:\n\n"]
     body_html = ["<html><body><pre style='font-family: sans-serif;'>Events Update:\n\n"]
@@ -165,6 +170,8 @@ def send_summary(
             body_html.append(html_block)
 
     body_html.append("</pre></body></html>")
-    email_sender.send_email(
-        config.RECIPIENT_EMAIL, subject, "".join(body), html_body="".join(body_html)
+    return SummaryMessage(
+        subject=subject,
+        body="".join(body),
+        html_body="".join(body_html),
     )

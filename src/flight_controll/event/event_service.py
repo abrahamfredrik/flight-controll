@@ -6,7 +6,7 @@ from . import repository, notifier, utils
 from .change_detector import detect_removed_events, detect_updates, normalize_dtstamp
 
 from ..webcal.fetcher import WebcalFetcher
-from ..mail.sender import MailService
+from ..mail.sender import EmailSenderFactory, MailService
 from ..config import Config
 
 EXCLUDED_LOCATIONS = ["privat"]
@@ -22,7 +22,7 @@ class EventService:
         self,
         config: Config,
         repo: repository.EventRepository,
-        email_sender_cls=MailService,
+        email_sender_cls: EmailSenderFactory = MailService,
         fetcher_cls=WebcalFetcher,
     ):
         self.logger = logging.getLogger(__name__)
@@ -98,16 +98,30 @@ class EventService:
         removed_events: List[Dict[str, Any]],
         updated_events: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
-        """Send a single summary email covering added, removed and updated events.
+        """Render and send a single summary email for the event changes.
 
-        Delegates to the `notifier` module which builds the HTML/plain bodies.
+        Message formatting is delegated to `notifier`; the configured mail
+        transport is responsible only for delivery.
         """
-        notifier.send_summary(
-            self.email_sender_cls,
-            self.config,
+        message = notifier.render_summary(
             added_events or [],
             removed_events or [],
             updated_events or [],
+        )
+        if message is None:
+            return
+
+        email_sender = self.email_sender_cls(
+            self.config.SMTP_SERVER,
+            self.config.SMTP_PORT,
+            self.config.SMTP_USERNAME,
+            self.config.SMTP_PASSWORD,
+        )
+        email_sender.send_email(
+            self.config.RECIPIENT_EMAIL,
+            message.subject,
+            message.body,
+            html_body=message.html_body,
         )
 
     def filter_new_events(self, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

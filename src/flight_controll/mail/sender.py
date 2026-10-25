@@ -1,10 +1,34 @@
 import logging
 import smtplib
-from typing import Optional
+from typing import Optional, Protocol
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 logger = logging.getLogger(__name__)
+
+
+class EmailSenderProtocol(Protocol):
+    """Common message-delivery interface for configured mail transports."""
+
+    def send_email(
+        self,
+        recipient: str,
+        subject: str,
+        body: str,
+        html_body: Optional[str] = None,
+    ) -> None: ...
+
+
+class EmailSenderFactory(Protocol):
+    """Factory interface for SMTP and webhook sender implementations."""
+
+    def __call__(
+        self,
+        smtp_server: str,
+        smtp_port: int,
+        username: str,
+        password: str,
+    ) -> EmailSenderProtocol: ...
 
 
 class EmailSender:
