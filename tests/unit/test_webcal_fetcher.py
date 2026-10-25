@@ -3,6 +3,7 @@ from unittest.mock import patch, MagicMock
 from datetime import datetime
 
 from flight_controll.webcal.fetcher import WebcalFetcher
+from flight_controll.webcal.parser import parse_ical_events
 
 MOCK_ICAL_DATA = """BEGIN:VCALENDAR
 BEGIN:VEVENT
@@ -23,6 +24,15 @@ DESCRIPTION:Second test event\\nLine two
 END:VEVENT
 END:VCALENDAR
 """
+
+
+def test_parse_ical_events_without_http():
+    events = parse_ical_events(MOCK_ICAL_DATA)
+
+    assert len(events) == 2
+    assert events[0]["uid"] == "event-1@example.com"
+    assert events[0]["dtstart"] == datetime(2025, 10, 22, 10, 0)
+    assert events[0]["description"] == "This is a test event\nMore details here"
 
 
 @patch("flight_controll.webcal.fetcher.requests.get")
