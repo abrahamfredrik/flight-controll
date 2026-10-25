@@ -39,3 +39,24 @@ def test_successful_post(monkeypatch):
     assert "Subj" in payload["content"]
     assert "Plain body" in payload["content"]
     assert timeout == 5
+
+
+def test_transient_server_failure_retries(monkeypatch):
+    os.environ["DISCORD_WEBHOOK_URL"] = "https://discord.test/webhook"
+    responses = [
+        SimpleNamespace(status_code=500, text="temporary failure"),
+        SimpleNamespace(status_code=204, text=""),
+    ]
+    posts = []
+
+    def fake_post(url, json, timeout):
+        posts.append((url, json, timeout))
+        return responses.pop(0)
+
+    monkeypatch.setattr("flight_controll.mail.discord_sender.requests.post", fake_post)
+    from flight_controll.mail.discord_sender import DiscordWebhookSender
+
+    sender = DiscordWebhookSender(max_retries=2)
+    sender.send_email("recipient", "Subject", "Body")
+
+    assert len(posts) == 2

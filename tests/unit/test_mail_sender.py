@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from flight_controll.mail.sender import EmailSender
+from flight_controll.mail.sender import EmailSender, MailService
 
 
 @pytest.fixture
@@ -60,3 +60,25 @@ def test_send_email_failure(mock_smtp, email_sender, caplog):
 
     assert "Failed to send email" in caplog.text
     assert "SMTP connection failed" in caplog.text
+
+
+def test_mail_service_retries_transient_smtp_failure():
+    smtp_server = MagicMock()
+    smtp_context = MagicMock()
+    smtp_context.__enter__.return_value = smtp_server
+    smtp_class = MagicMock(
+        side_effect=[OSError("temporary failure"), smtp_context]
+    )
+    mail_service = MailService(
+        smtp_server="smtp.example.com",
+        smtp_port=587,
+        username="user@example.com",
+        password="securepassword",
+        smtp_class=smtp_class,
+        max_retries=2,
+    )
+
+    mail_service.send_email("recipient@example.com", "Subject", "Body")
+
+    assert smtp_class.call_count == 2
+    smtp_server.send_message.assert_called_once()
