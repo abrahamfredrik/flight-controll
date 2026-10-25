@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Optional, Set
 from datetime import datetime
 import time
 from . import repository, notifier, utils
-from .change_detector import detect_and_apply_updates, fetch_removed_events, normalize_dtstamp
+from .change_detector import detect_removed_events, detect_updates, normalize_dtstamp
 
 from ..webcal.fetcher import WebcalFetcher
 from ..mail.sender import MailService
@@ -154,12 +154,20 @@ class EventService:
             new_events = [event for event in events if event["uid"] not in existing_matching]
             new_count = len(new_events)
 
-        # Detect and apply updates for events that still exist but changed
-        updated_events = detect_and_apply_updates(events, existing_matching, self.repository)
+        # Compare matching events, then persist the detected changes.
+        stored_matching = self.repository.find_docs_by_uids(list(existing_matching))
+        detected_updates = detect_updates(events, stored_matching)
+        for update in detected_updates:
+            self.repository.update_one(update.uid, update.set_payload)
+        updated_events = [update.notification for update in detected_updates]
         updated_count = len(updated_events)
 
-        # Find and remove events that existed previously but are no longer fetched
-        removed_events = fetch_removed_events(existing_all, fetched_uids, self.repository)
+        # Select eligible removals, then remove them from persistence.
+        removed_uids = existing_all - fetched_uids
+        stored_removed = self.repository.find_docs_by_uids(list(removed_uids))
+        removed_events = detect_removed_events(existing_all, fetched_uids, stored_removed)
+        if removed_events:
+            self.repository.delete_by_uids([event["uid"] for event in removed_events])
         removed_count = len(removed_events)
 
         # persist new events and send a single summary email for added/removed/updated

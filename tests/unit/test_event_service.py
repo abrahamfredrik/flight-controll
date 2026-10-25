@@ -436,7 +436,7 @@ def test_recent_removed_event_is_removed():
         ),
     ],
 )
-def test_detect_and_apply_updates_param(
+def test_event_service_persists_detected_updates_param(
     case_name, stored_doc, fetched_event, expected_strings
 ):
     """Parametrized test for update detection: time, description, and location changes."""

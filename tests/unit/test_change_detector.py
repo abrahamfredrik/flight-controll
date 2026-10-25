@@ -1,12 +1,11 @@
 import pytest
-from unittest.mock import MagicMock
 from datetime import datetime, timedelta, timezone
 
 from flight_controll.event.change_detector import (
     normalize_dtstamp,
     event_changed,
-    detect_and_apply_updates,
-    fetch_removed_events,
+    detect_updates,
+    detect_removed_events,
 )
 
 
@@ -57,8 +56,7 @@ def test_event_changed_detects_real_change_and_ignores_dtstamp_only():
     )
 
 
-def test_detect_and_apply_updates_updates_changed_event_and_returns_payload():
-    repo = MagicMock()
+def test_detect_updates_returns_persistence_and_notification_data():
     stored_doc = {
         "uid": "u1",
         "summary": "Event",
@@ -67,9 +65,6 @@ def test_detect_and_apply_updates_updates_changed_event_and_returns_payload():
         "description": "Old desc",
         "location": "Room A",
     }
-    repo.find_docs_by_uids.return_value = [stored_doc]
-    repo.update_one = MagicMock()
-
     events = [
         {
             "uid": "u1",
@@ -81,17 +76,16 @@ def test_detect_and_apply_updates_updates_changed_event_and_returns_payload():
         }
     ]
 
-    results = detect_and_apply_updates(events, {"u1"}, repo)
+    results = detect_updates(events, [stored_doc])
 
     assert len(results) == 1
-    assert repo.update_one.called
-    assert results[0]["uid"] == "u1"
-    assert results[0]["old_description"] == "Old desc"
-    assert results[0]["new_description"] == "New desc"
+    assert results[0].uid == "u1"
+    assert results[0].set_payload["description"] == "New desc"
+    assert results[0].notification["old_description"] == "Old desc"
+    assert results[0].notification["new_description"] == "New desc"
 
 
-def test_detect_and_apply_updates_skips_dtstamp_only_description_change():
-    repo = MagicMock()
+def test_detect_updates_skips_dtstamp_only_description_change():
     stored_doc = {
         "uid": "u2",
         "summary": "Event",
@@ -100,9 +94,6 @@ def test_detect_and_apply_updates_skips_dtstamp_only_description_change():
         "description": "Same description",
         "location": "Room A",
     }
-    repo.find_docs_by_uids.return_value = [stored_doc]
-    repo.update_one = MagicMock()
-
     events = [
         {
             "uid": "u2",
@@ -114,14 +105,12 @@ def test_detect_and_apply_updates_skips_dtstamp_only_description_change():
         }
     ]
 
-    results = detect_and_apply_updates(events, {"u2"}, repo)
+    results = detect_updates(events, [stored_doc])
 
     assert results == []
-    repo.update_one.assert_not_called()
 
 
-def test_fetch_removed_events_deletes_future_documents_and_returns_them():
-    repo = MagicMock()
+def test_detect_removed_events_selects_future_documents():
     future_start = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
     stored_docs = [
         {
@@ -131,17 +120,12 @@ def test_fetch_removed_events_deletes_future_documents_and_returns_them():
             "end_time": "2099-01-01T11:00:00",
         }
     ]
-    repo.find_docs_by_uids.return_value = stored_docs
-    repo.delete_by_uids = MagicMock()
-
-    results = fetch_removed_events({"r1"}, set(), repo)
+    results = detect_removed_events({"r1"}, set(), stored_docs)
 
     assert results == stored_docs
-    repo.delete_by_uids.assert_called_once_with(["r1"])
 
 
-def test_fetch_removed_events_ignores_past_documents():
-    repo = MagicMock()
+def test_detect_removed_events_ignores_past_documents():
     past_start = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     stored_docs = [
         {
@@ -151,10 +135,6 @@ def test_fetch_removed_events_ignores_past_documents():
             "end_time": "2099-01-01T11:00:00",
         }
     ]
-    repo.find_docs_by_uids.return_value = stored_docs
-    repo.delete_by_uids = MagicMock()
-
-    results = fetch_removed_events({"r2"}, set(), repo)
+    results = detect_removed_events({"r2"}, set(), stored_docs)
 
     assert results == []
-    repo.delete_by_uids.assert_not_called()
