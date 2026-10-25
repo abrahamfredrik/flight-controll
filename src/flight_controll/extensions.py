@@ -67,6 +67,10 @@ def init_extensions(app: Flask) -> None:
             from .event.event_service import EventService
             from .webcal.fetcher import WebcalFetcher
             from .mail.sender import MailService
+            try:
+                from .mail.discord_sender import DiscordWebhookSender
+            except Exception:
+                DiscordWebhookSender = None
 
             def make_event_service(
                 cfg=None,
@@ -76,10 +80,16 @@ def init_extensions(app: Flask) -> None:
             ) -> EventService:
                 config_obj = cfg or getattr(app, "app_config")
                 coll = events_collection_override or events_collection
+                # If a Discord webhook is configured and the sender is available,
+                # prefer the DiscordWebhookSender so callers don't need to change.
+                if getattr(config_obj, "DISCORD_WEBHOOK_URL", None) and DiscordWebhookSender is not None:
+                    chosen_sender = DiscordWebhookSender
+                else:
+                    chosen_sender = email_sender_cls
                 return EventService(
                     config=config_obj,
                     fetcher_cls=fetcher_cls,
-                    email_sender_cls=email_sender_cls,
+                    email_sender_cls=chosen_sender,
                     events_collection=coll,
                 )
 

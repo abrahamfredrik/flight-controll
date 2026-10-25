@@ -23,7 +23,7 @@ def event_changed(
     new_desc: Optional[str],
     old_loc: Optional[str],
     new_loc: Optional[str],
-) -> bool:
+ ) -> bool:
     if (old_start is None) != (new_start is None):
         return True
     if old_start is not None and new_start is not None and old_start != new_start:
