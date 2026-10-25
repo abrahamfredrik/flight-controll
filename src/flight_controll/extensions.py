@@ -20,6 +20,45 @@ def init_extensions(app: Flask) -> None:
     Args:
         app: the Flask application instance
     """
+    app.extensions = getattr(app, "extensions", {})
+
+    def make_event_service(
+        cfg: Optional[object] = None,
+        fetcher_cls: Optional[type] = None,
+        email_sender_cls: Optional[type] = None,
+        repo_override: Optional[object] = None,
+    ) -> "EventService":
+        """Build an event service from app-owned persistence and adapters."""
+        from .event.event_service import EventService
+        from .event.repository import EventRepository
+        from .webcal.fetcher import WebcalFetcher
+        from .mail.sender import MailService
+
+        config_obj = cfg or getattr(app, "app_config")
+        repo = repo_override
+        if repo is None:
+            events_collection = app.extensions.get("events_collection")
+            if events_collection is None:
+                raise RuntimeError(
+                    "Event repository is unavailable; Mongo is not configured"
+                )
+            repo = EventRepository(events_collection)
+
+        selected_sender = email_sender_cls or MailService
+        if getattr(config_obj, "DISCORD_WEBHOOK_URL", None):
+            from .mail.discord_sender import DiscordWebhookSender
+
+            selected_sender = DiscordWebhookSender
+
+        return EventService(
+            config=config_obj,
+            repo=repo,
+            fetcher_cls=fetcher_cls or WebcalFetcher,
+            email_sender_cls=selected_sender,
+        )
+
+    app.extensions["make_event_service"] = make_event_service
+
     # Lazily import PyMongo to avoid import-time side effects in tests
     try:
         from pymongo import MongoClient
@@ -57,46 +96,9 @@ def init_extensions(app: Flask) -> None:
             event_repository.create_indexes(events_collection)
         except Exception:
             logger.exception("Failed to create indexes on events collection; continuing")
-        # attach to app.extensions for consumption by services and blueprints
-        app.extensions = getattr(app, "extensions", {})
+        # Attach the shared collection for the app's service factory.
         app.extensions["mongo_client"] = client
         app.extensions["events_collection"] = events_collection
-        # provide a factory to create configured EventService instances so
-        # callers (scheduler, blueprints) don't construct Mongo clients directly
-        try:
-            from .event.event_service import EventService
-            from .webcal.fetcher import WebcalFetcher
-            from .mail.sender import MailService
-            try:
-                from .mail.discord_sender import DiscordWebhookSender
-            except Exception:
-                DiscordWebhookSender = None
-
-            def make_event_service(
-                cfg=None,
-                fetcher_cls: type = WebcalFetcher,
-                email_sender_cls: type = MailService,
-                events_collection_override: Optional[object] = None,
-            ) -> EventService:
-                config_obj = cfg or getattr(app, "app_config")
-                coll = events_collection_override or events_collection
-                # If a Discord webhook is configured and the sender is available,
-                # prefer the DiscordWebhookSender so callers don't need to change.
-                if getattr(config_obj, "DISCORD_WEBHOOK_URL", None) and DiscordWebhookSender is not None:
-                    chosen_sender = DiscordWebhookSender
-                else:
-                    chosen_sender = email_sender_cls
-                return EventService(
-                    config=config_obj,
-                    fetcher_cls=fetcher_cls,
-                    email_sender_cls=chosen_sender,
-                    events_collection=coll,
-                )
-
-            app.extensions["make_event_service"] = make_event_service
-        except Exception:
-            # don't fail if imports aren't available in some test environments
-            app.extensions["make_event_service"] = None
         logger.info("Mongo client and events collection attached to app.extensions")
     except Exception:
         logger.exception("Failed to initialize Mongo client; continuing without DB")

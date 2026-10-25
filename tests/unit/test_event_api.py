@@ -1,4 +1,11 @@
-from unittest.mock import MagicMock, patch
+import pytest
+from unittest.mock import MagicMock
+
+from flight_controll import create_app
+
+
+class ConfigWithoutMongo:
+    SCHEDULER_ENABLED = False
 
 
 def make_service_mock(return_events=None):
@@ -12,21 +19,34 @@ def make_service_mock(return_events=None):
     return inst
 
 
-@patch("flight_controll.rest.event_api.EventService")
-def test_fetch_endpoint_returns_filtered_events(mock_event_service, client):
+def test_service_factory_is_registered_without_mongo_config():
+    app = create_app(config_object=ConfigWithoutMongo, enable_scheduler=False)
+    make_service = app.extensions["make_event_service"]
+
+    with pytest.raises(RuntimeError, match="Mongo is not configured"):
+        make_service()
+
+    collection = MagicMock()
+    app.extensions["events_collection"] = collection
+    service = make_service()
+
+    assert service.repository.collection is collection
+
+
+def test_fetch_endpoint_returns_filtered_events(client):
     data = [{"uid": "1", "summary": "S", "dtstart": "d", "dtend": "e"}]
-    mock_event_service.return_value = make_service_mock(return_events=data)
+    service = make_service_mock(return_events=data)
+    client.application.extensions["make_event_service"] = MagicMock(return_value=service)
 
     resp = client.post("/events/fetch")
     assert resp.status_code == 200
     assert resp.get_json() == data
 
 
-@patch("flight_controll.rest.event_api.EventService")
-def test_fetch_persist_endpoint_stores_events(mock_event_service, client):
+def test_fetch_persist_endpoint_stores_events(client):
     data = [{"uid": "1", "summary": "S"}]
     inst = make_service_mock(return_events=data)
-    mock_event_service.return_value = inst
+    client.application.extensions["make_event_service"] = MagicMock(return_value=inst)
 
     resp = client.post("/events/fetch-persist")
     assert resp.status_code == 200
@@ -34,11 +54,10 @@ def test_fetch_persist_endpoint_stores_events(mock_event_service, client):
     inst.store_events.assert_called_once()
 
 
-@patch("flight_controll.rest.event_api.EventService")
-def test_trigger_check_calls_fetch_persist_and_send(mock_event_service, client):
+def test_trigger_check_calls_fetch_persist_and_send(client):
     data = [{"uid": "1", "summary": "S"}]
     inst = make_service_mock(return_events=data)
-    mock_event_service.return_value = inst
+    client.application.extensions["make_event_service"] = MagicMock(return_value=inst)
 
     resp = client.post("/events/trigger-check")
     assert resp.status_code == 200

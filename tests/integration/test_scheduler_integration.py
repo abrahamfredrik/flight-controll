@@ -1,4 +1,5 @@
 from flight_controll.event.event_service import EventService
+from flight_controll.event.repository import EventRepository
 
 
 class FakeCollection:
@@ -88,6 +89,16 @@ class FakeEmailSender:
         })
 
 
+def make_event_service(app, collection, fetcher_cls=FakeFetcher):
+    app.app_config.WEB_CAL_URL = "http://test.local/calendar.ics"
+    return EventService(
+        config=app.app_config,
+        repo=EventRepository(collection),
+        email_sender_cls=FakeEmailSender,
+        fetcher_cls=fetcher_cls,
+    )
+
+
 def test_scheduler_flow_sends_email_for_new_event(app):
     """Integration-style test: run the scheduler flow (via EventService) end-to-end.
 
@@ -95,15 +106,8 @@ def test_scheduler_flow_sends_email_for_new_event(app):
     so the test does not require network or a real MongoDB instance.
     """
 
-    # create EventService instance without calling its real __init__ (avoid real MongoClient)
-    es = object.__new__(EventService)
-    es.logger = None
-    es.config = app.app_config
-    # provide WEB_CAL_URL expected by EventService.fetch_events
-    es.config.WEB_CAL_URL = "http://test.local/calendar.ics"
-    es.email_sender_cls = FakeEmailSender
-    es.fetcher_cls = FakeFetcher
-    es.events_collection = FakeCollection()
+    collection = FakeCollection()
+    es = make_event_service(app, collection)
 
     # Ensure no previous sent emails
     FakeEmailSender.sent.clear()
@@ -112,7 +116,7 @@ def test_scheduler_flow_sends_email_for_new_event(app):
 
     assert len(events) == 1
     # event should have been persisted to our fake collection
-    assert len(es.events_collection.docs) == 1
+    assert len(collection.docs) == 1
     # email should have been sent
     assert FakeEmailSender.sent, "expected an email to be sent"
     sent = FakeEmailSender.sent[0]
@@ -122,14 +126,6 @@ def test_scheduler_flow_sends_email_for_new_event(app):
 
 def test_scheduler_no_email_for_existing_event(app):
     """If the event already exists in the DB, no email is sent."""
-
-    es = object.__new__(EventService)
-    es.logger = None
-    es.config = app.app_config
-    # provide WEB_CAL_URL expected by EventService.fetch_events
-    es.config.WEB_CAL_URL = "http://test.local/calendar.ics"
-    es.email_sender_cls = FakeEmailSender
-    es.fetcher_cls = FakeFetcher
 
     # prepare fake collection with existing event
     fc = FakeCollection()
@@ -143,7 +139,7 @@ def test_scheduler_no_email_for_existing_event(app):
             "location": "Location A",
         }
     )
-    es.events_collection = fc
+    es = make_event_service(app, fc)
 
     FakeEmailSender.sent.clear()
 
@@ -151,7 +147,7 @@ def test_scheduler_no_email_for_existing_event(app):
 
     # no new events should be returned or stored
     assert len(events) == 0
-    assert len(es.events_collection.docs) == 1
+    assert len(fc.docs) == 1
     # and no email should be sent
     assert not FakeEmailSender.sent
 
@@ -159,15 +155,8 @@ def test_scheduler_no_email_for_existing_event(app):
 def test_scheduler_multiple_events_single_email(app):
     """When multiple new events are found, only a single email is sent containing all events."""
 
-    es = object.__new__(EventService)
-    es.logger = None
-    es.config = app.app_config
-    es.config.WEB_CAL_URL = "http://test.local/calendar.ics"
-    es.email_sender_cls = FakeEmailSender
-    # use fetcher that returns several events
-    es.fetcher_cls = MultiEventFetcher
-
-    es.events_collection = FakeCollection()
+    collection = FakeCollection()
+    es = make_event_service(app, collection, MultiEventFetcher)
 
     FakeEmailSender.sent.clear()
 
@@ -175,7 +164,7 @@ def test_scheduler_multiple_events_single_email(app):
 
     # all events should be returned and stored
     assert len(events) == 3
-    assert len(es.events_collection.docs) == 3
+    assert len(collection.docs) == 3
 
     # only one email should have been sent
     assert len(FakeEmailSender.sent) == 1
@@ -196,14 +185,6 @@ def test_scheduler_reports_removed_future_event(app):
         def fetch_events(self):
             return []
 
-    # create EventService instance without calling its real __init__
-    es = object.__new__(EventService)
-    es.logger = None
-    es.config = app.app_config
-    es.config.WEB_CAL_URL = "http://test.local/calendar.ics"
-    es.email_sender_cls = FakeEmailSender
-    es.fetcher_cls = EmptyFetcher
-
     # prepare fake collection with an event in the future
     fc = FakeCollection()
     fc.insert_one(
@@ -216,7 +197,7 @@ def test_scheduler_reports_removed_future_event(app):
             "location": "Location R",
         }
     )
-    es.events_collection = fc
+    es = make_event_service(app, fc, EmptyFetcher)
 
     FakeEmailSender.sent.clear()
 
@@ -225,7 +206,7 @@ def test_scheduler_reports_removed_future_event(app):
     # no new events returned
     assert events == []
     # removed from fake collection
-    assert len(es.events_collection.docs) == 0
+    assert len(fc.docs) == 0
     # and an email should have been sent about removals
     assert len(FakeEmailSender.sent) == 1
     sent = FakeEmailSender.sent[0]
@@ -240,13 +221,6 @@ def test_scheduler_ignores_removed_past_event(app):
         def fetch_events(self):
             return []
 
-    es = object.__new__(EventService)
-    es.logger = None
-    es.config = app.app_config
-    es.config.WEB_CAL_URL = "http://test.local/calendar.ics"
-    es.email_sender_cls = FakeEmailSender
-    es.fetcher_cls = EmptyFetcher
-
     fc = FakeCollection()
     fc.insert_one(
         {
@@ -258,7 +232,7 @@ def test_scheduler_ignores_removed_past_event(app):
             "location": "Location P",
         }
     )
-    es.events_collection = fc
+    es = make_event_service(app, fc, EmptyFetcher)
 
     FakeEmailSender.sent.clear()
 
@@ -266,7 +240,7 @@ def test_scheduler_ignores_removed_past_event(app):
 
     assert events == []
     # should remain in collection
-    assert len(es.events_collection.docs) == 1
+    assert len(fc.docs) == 1
     # and no email sent
     assert not FakeEmailSender.sent
 
@@ -305,13 +279,6 @@ def test_scheduler_reports_updated_event(app):
                 }
             ]
 
-    es = object.__new__(EventService)
-    es.logger = None
-    es.config = app.app_config
-    es.config.WEB_CAL_URL = "http://test.local/calendar.ics"
-    es.email_sender_cls = FakeEmailSender
-    es.fetcher_cls = UpdateFetcher
-
     fc = UpdateableFakeCollection()
     fc.insert_one(
         {
@@ -323,7 +290,7 @@ def test_scheduler_reports_updated_event(app):
             "location": "Location U",
         }
     )
-    es.events_collection = fc
+    es = make_event_service(app, fc, UpdateFetcher)
 
     FakeEmailSender.sent.clear()
 
@@ -333,7 +300,7 @@ def test_scheduler_reports_updated_event(app):
     assert events == []
 
     # DB should have been updated by update_one (allow timezone suffix)
-    assert es.events_collection.docs[0]["start_time"].startswith("2099-02-02T10:00:00")
+    assert fc.docs[0]["start_time"].startswith("2099-02-02T10:00:00")
 
     # and an email should have been sent about the update
     assert len(FakeEmailSender.sent) == 1

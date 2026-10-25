@@ -1,9 +1,9 @@
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from datetime import datetime, timedelta, timezone
 
-from flight_controll.event import event_service as es_module
 from flight_controll.event.event_service import EventService
+from flight_controll.event.repository import EventRepository
 
 
 class DummyConfig:
@@ -20,7 +20,6 @@ class DummyConfig:
     RECIPIENT_EMAIL = "r@example.com"
 
 
-@patch.object(es_module, "MongoClient")
 @pytest.mark.parametrize(
     "text, expected",
     [
@@ -33,32 +32,26 @@ class DummyConfig:
         (None, ""),
     ],
 )
-def test_normalize_dtstamp(mock_mongo_client, text, expected):
+def test_normalize_dtstamp(text, expected):
     """Unit tests for normalize_dtstamp: no DTSTAMP, DTSTAMP lines removed, empty, None."""
     config = DummyConfig()
     es = EventService(
         config=config,
         email_sender_cls=MagicMock,
         fetcher_cls=MagicMock,
-        events_collection=MagicMock(),
+        repo=EventRepository(MagicMock()),
     )
     assert es.normalize_dtstamp(text) == expected
 
 
-@patch.object(es_module, "MongoClient")
-def test_store_events_inserts_only_new(
-    mock_mongo_client, fake_collection, fake_sender_cls
-):
+def test_store_events_inserts_only_new(fake_collection, fake_sender_cls):
     config = DummyConfig()
 
-    # Build a fake mongo client that returns a db containing our fixture collection
-    mock_db = {config.MONGO_COLLECTION: fake_collection}
-    mock_client = MagicMock()
-    mock_client.__getitem__.return_value = mock_db
-    mock_mongo_client.return_value = mock_client
-
     es = EventService(
-        config=config, email_sender_cls=fake_sender_cls[0], fetcher_cls=MagicMock
+        config=config,
+        email_sender_cls=fake_sender_cls[0],
+        fetcher_cls=MagicMock,
+        repo=EventRepository(fake_collection),
     )
 
     events = [{"uid": "uid-1", "summary": "S", "dtstart": "s", "dtend": "e"}]
@@ -70,19 +63,18 @@ def test_store_events_inserts_only_new(
     fake_collection.insert_one.assert_called_once()
 
 
-@patch.object(es_module, "MongoClient")
-def test_filter_new_events_filters_existing(mock_mongo_client):
+def test_filter_new_events_filters_existing():
     config = DummyConfig()
     mock_collection = MagicMock()
     # Simulate existing uid in DB
     mock_collection.find.return_value = [{"uid": "existing"}]
 
-    mock_db = {config.MONGO_COLLECTION: mock_collection}
-    mock_client = MagicMock()
-    mock_client.__getitem__.return_value = mock_db
-    mock_mongo_client.return_value = mock_client
-
-    es = EventService(config=config, email_sender_cls=MagicMock, fetcher_cls=MagicMock)
+    es = EventService(
+        config=config,
+        email_sender_cls=MagicMock,
+        fetcher_cls=MagicMock,
+        repo=EventRepository(mock_collection),
+    )
 
     events = [
         {"uid": "existing", "summary": "old", "dtstart": "s", "dtend": "e"},
@@ -94,13 +86,9 @@ def test_filter_new_events_filters_existing(mock_mongo_client):
     assert out[0]["uid"] == "new"
 
 
-@patch.object(es_module, "MongoClient")
-def test_fetch_events_filters_privileged_location(mock_mongo_client):
+def test_fetch_events_filters_privileged_location():
     config = DummyConfig()
-
-    mock_client = MagicMock()
-    mock_client.__getitem__.return_value = {config.MONGO_COLLECTION: MagicMock()}
-    mock_mongo_client.return_value = mock_client
+    mock_collection = MagicMock()
 
     # Patch the fetcher class to return some sample events
     fake_events = [
@@ -128,7 +116,10 @@ def test_fetch_events_filters_privileged_location(mock_mongo_client):
             return fake_events
 
     es = EventService(
-        config=config, email_sender_cls=MagicMock, fetcher_cls=FakeFetcher
+        config=config,
+        email_sender_cls=MagicMock,
+        fetcher_cls=FakeFetcher,
+        repo=EventRepository(mock_collection),
     )
 
     out = es.fetch_events()
@@ -137,17 +128,14 @@ def test_fetch_events_filters_privileged_location(mock_mongo_client):
     assert out[0]["uid"] == "2"
 
 
-@patch.object(es_module, "MongoClient")
-def test_send_events_email_uses_sender(
-    mock_mongo_client, fake_collection, fake_sender_cls
-):
+def test_send_events_email_uses_sender(fake_collection, fake_sender_cls):
     config = DummyConfig()
-    mock_client = MagicMock()
-    mock_client.__getitem__.return_value = {config.MONGO_COLLECTION: fake_collection}
-    mock_mongo_client.return_value = mock_client
 
     es = EventService(
-        config=config, email_sender_cls=fake_sender_cls[0], fetcher_cls=MagicMock
+        config=config,
+        email_sender_cls=fake_sender_cls[0],
+        fetcher_cls=MagicMock,
+        repo=EventRepository(fake_collection),
     )
 
     events = [
@@ -169,8 +157,7 @@ def test_send_events_email_uses_sender(
     fake_sender_cls[1].send_email.assert_called_once()
 
 
-@patch.object(es_module, "MongoClient")
-def test_removed_event_behavior(mock_mongo_client, fake_collection, fake_sender_cls):
+def test_removed_event_behavior(fake_collection, fake_sender_cls):
     """Parametrized test covering future, past and recent (within 10h) removed-event behavior."""
     config = DummyConfig()
 
@@ -204,11 +191,6 @@ def test_removed_event_behavior(mock_mongo_client, fake_collection, fake_sender_
         )
         fake_collection.delete_many = MagicMock()
 
-        mock_db = {config.MONGO_COLLECTION: fake_collection}
-        mock_client = MagicMock()
-        mock_client.__getitem__.return_value = mock_db
-        mock_mongo_client.return_value = mock_client
-
         class FakeFetcher:
             def __init__(self, url):
                 pass
@@ -219,7 +201,10 @@ def test_removed_event_behavior(mock_mongo_client, fake_collection, fake_sender_
                 ]
 
         es = EventService(
-            config=config, email_sender_cls=fake_sender_cls[0], fetcher_cls=FakeFetcher
+            config=config,
+            email_sender_cls=fake_sender_cls[0],
+            fetcher_cls=FakeFetcher,
+            repo=EventRepository(fake_collection),
         )
 
         out = es.fetch_persist_and_send_events()
@@ -250,8 +235,7 @@ def test_removed_event_behavior(mock_mongo_client, fake_collection, fake_sender_
     fake_sender_cls[1].send_email.assert_called()
 
 
-@patch.object(es_module, "MongoClient")
-def test_past_removed_event_is_ignored(mock_mongo_client):
+def test_past_removed_event_is_ignored():
     """If a stored event is removed but its start time is in the past, it should not be deleted or emailed about."""
     config = DummyConfig()
 
@@ -278,11 +262,6 @@ def test_past_removed_event_is_ignored(mock_mongo_client):
     )
     mock_collection.delete_many = MagicMock()
 
-    mock_db = {config.MONGO_COLLECTION: mock_collection}
-    mock_client = MagicMock()
-    mock_client.__getitem__.return_value = mock_db
-    mock_mongo_client.return_value = mock_client
-
     # Fake fetcher returns only 'keep' event
     class FakeFetcher:
         def __init__(self, url):
@@ -296,7 +275,10 @@ def test_past_removed_event_is_ignored(mock_mongo_client):
     fake_sender_cls.return_value = fake_sender_instance
 
     es = EventService(
-        config=config, email_sender_cls=fake_sender_cls, fetcher_cls=FakeFetcher
+        config=config,
+        email_sender_cls=fake_sender_cls,
+        fetcher_cls=FakeFetcher,
+        repo=EventRepository(mock_collection),
     )
 
     out = es.fetch_persist_and_send_events()
@@ -311,8 +293,7 @@ def test_past_removed_event_is_ignored(mock_mongo_client):
     fake_sender_instance.send_email.assert_not_called()
 
 
-@patch.object(es_module, "MongoClient")
-def test_recent_removed_event_is_removed(mock_mongo_client):
+def test_recent_removed_event_is_removed():
     """A stored event that started within the last 10 hours should be removed and emailed about."""
     config = DummyConfig()
 
@@ -339,11 +320,6 @@ def test_recent_removed_event_is_removed(mock_mongo_client):
     )
     mock_collection.delete_many = MagicMock()
 
-    mock_db = {config.MONGO_COLLECTION: mock_collection}
-    mock_client = MagicMock()
-    mock_client.__getitem__.return_value = mock_db
-    mock_mongo_client.return_value = mock_client
-
     # Fake fetcher returns only 'keep' event
     class FakeFetcher:
         def __init__(self, url):
@@ -357,7 +333,10 @@ def test_recent_removed_event_is_removed(mock_mongo_client):
     fake_sender_cls.return_value = fake_sender_instance
 
     es = EventService(
-        config=config, email_sender_cls=fake_sender_cls, fetcher_cls=FakeFetcher
+        config=config,
+        email_sender_cls=fake_sender_cls,
+        fetcher_cls=FakeFetcher,
+        repo=EventRepository(mock_collection),
     )
 
     out = es.fetch_persist_and_send_events()
@@ -372,7 +351,6 @@ def test_recent_removed_event_is_removed(mock_mongo_client):
     fake_sender_instance.send_email.assert_called()
 
 
-@patch.object(es_module, "MongoClient")
 @pytest.mark.parametrize(
     "case_name, stored_doc, fetched_event, expected_strings",
     [
@@ -459,7 +437,7 @@ def test_recent_removed_event_is_removed(mock_mongo_client):
     ],
 )
 def test_detect_and_apply_updates_param(
-    mock_mongo_client, case_name, stored_doc, fetched_event, expected_strings
+    case_name, stored_doc, fetched_event, expected_strings
 ):
     """Parametrized test for update detection: time, description, and location changes."""
     config = DummyConfig()
@@ -480,11 +458,6 @@ def test_detect_and_apply_updates_param(
     )
     mock_collection.update_one = MagicMock()
 
-    mock_db = {config.MONGO_COLLECTION: mock_collection}
-    mock_client = MagicMock()
-    mock_client.__getitem__.return_value = mock_db
-    mock_mongo_client.return_value = mock_client
-
     class FakeFetcher:
         def __init__(self, url):
             pass
@@ -497,7 +470,10 @@ def test_detect_and_apply_updates_param(
     fake_sender_cls.return_value = fake_sender_instance
 
     es = EventService(
-        config=config, email_sender_cls=fake_sender_cls, fetcher_cls=FakeFetcher
+        config=config,
+        email_sender_cls=fake_sender_cls,
+        fetcher_cls=FakeFetcher,
+        repo=EventRepository(mock_collection),
     )
 
     out = es.fetch_persist_and_send_events()
@@ -511,8 +487,7 @@ def test_detect_and_apply_updates_param(
         assert s in sent
 
 
-@patch.object(es_module, "MongoClient")
-def test_description_only_dtstamp_difference_not_considered_update(mock_mongo_client):
+def test_description_only_dtstamp_difference_not_considered_update():
     """When description differs only by a DTSTAMP line, no update is performed."""
     config = DummyConfig()
 
@@ -547,11 +522,6 @@ def test_description_only_dtstamp_difference_not_considered_update(mock_mongo_cl
     )
     mock_collection.update_one = MagicMock()
 
-    mock_db = {config.MONGO_COLLECTION: mock_collection}
-    mock_client = MagicMock()
-    mock_client.__getitem__.return_value = mock_db
-    mock_mongo_client.return_value = mock_client
-
     class FakeFetcher:
         def __init__(self, url):
             pass
@@ -564,7 +534,10 @@ def test_description_only_dtstamp_difference_not_considered_update(mock_mongo_cl
     fake_sender_cls.return_value = fake_sender_instance
 
     es = EventService(
-        config=config, email_sender_cls=fake_sender_cls, fetcher_cls=FakeFetcher
+        config=config,
+        email_sender_cls=fake_sender_cls,
+        fetcher_cls=FakeFetcher,
+        repo=EventRepository(mock_collection),
     )
 
     es.fetch_persist_and_send_events()

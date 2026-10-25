@@ -5,7 +5,6 @@ import time
 from . import repository, notifier, utils
 from .change_detector import detect_and_apply_updates, fetch_removed_events, normalize_dtstamp
 
-from pymongo import MongoClient
 from ..webcal.fetcher import WebcalFetcher
 from ..mail.sender import MailService
 from ..config import Config
@@ -16,51 +15,21 @@ EXCLUDED_LOCATIONS = ["privat"]
 class EventService:
     """Service responsible for fetching events, persisting new ones and sending email.
 
-    Improvements:
-    - Accept optional `mongo_client` or `events_collection` to allow dependency injection
-      for testing and to avoid creating real network clients at import-time.
-    - Keep backwards compatibility when mongo_client/events_collection are not provided.
+        Persistence and external adapters are injected by the application factory.
     """
 
     def __init__(
         self,
         config: Config,
+        repo: repository.EventRepository,
         email_sender_cls=MailService,
         fetcher_cls=WebcalFetcher,
-        mongo_client: Optional[MongoClient] = None,
-        events_collection: Optional[object] = None,
-        repo: Optional[repository.EventRepository] = None,
     ):
         self.logger = logging.getLogger(__name__)
         self.config = config
         self.email_sender_cls = email_sender_cls
         self.fetcher_cls = fetcher_cls
-        # Repository injection: accept an EventRepository instance directly
-        if repo is not None:
-            self.repository = repo
-            # expose underlying collection for backward compatibility
-            self.events_collection = getattr(self.repository, "collection", None)
-            self.mongo_client = getattr(self.repository, "collection", None)
-            self.db = None
-            return
-
-        # allow tests to inject a fake collection directly; wrap it in repository
-        if events_collection is not None:
-            self.events_collection = events_collection
-            self.mongo_client = mongo_client
-            self.db = None
-            self.repository = repository.EventRepository(self.events_collection)
-            return
-
-        # otherwise construct or use provided mongo_client and create repository
-        self.mongo_uri = (
-            f"mongodb+srv://{self.config.MONGO_USERNAME}:{self.config.MONGO_PASSWORD}@"
-            f"{self.config.MONGO_HOST}/{self.config.MONGO_DB}?retryWrites=true&w=majority"
-        )
-        self.mongo_client = mongo_client or MongoClient(self.mongo_uri)
-        self.db = self.mongo_client[self.config.MONGO_DB]
-        self.events_collection = self.db[self.config.MONGO_COLLECTION]
-        self.repository = repository.EventRepository(self.events_collection)
+        self.repository = repo
 
     def store_events(self, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Persist new event dicts to the events collection.
@@ -74,17 +43,6 @@ class EventService:
         # persist via repository
         self.repository.insert_events(events)
         return events
-
-    def _ensure_repository(self) -> None:
-        """Ensure `self.repository` is available, creating it from
-        `self.events_collection` when necessary (supports tests that set
-        `events_collection` on instances created via `object.__new__`).
-        """
-        if not hasattr(self, "repository") or self.repository is None:
-            if hasattr(self, "events_collection") and self.events_collection is not None:
-                self.repository = repository.EventRepository(self.events_collection)
-            else:
-                raise RuntimeError("No repository or events_collection available on EventService")
 
     def fetch_events(self) -> List[Dict[str, Any]]:
         """Fetch events from the external calendar provider and filter them.
@@ -168,13 +126,6 @@ class EventService:
         return normalize_dtstamp(text)
 
     def fetch_persist_and_send_events(self) -> List[Dict[str, Any]]:
-        # ensure repository is available for instances created without __init__
-        try:
-            self._ensure_repository()
-        except Exception:
-            # if repository cannot be ensured, allow original behavior to raise later
-            pass
-
         start_ts = time.monotonic()
         if self.logger:
             self.logger.info("fetch_persist_and_send_events.start", extra={"action": "fetch_start"})

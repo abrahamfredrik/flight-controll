@@ -25,7 +25,7 @@ jobs:
     uses: ./.github/workflows/test-component.yml
 
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: test
 
     steps:
@@ -73,7 +73,7 @@ jobs:
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
-        
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
