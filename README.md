@@ -1,62 +1,122 @@
 # flight-controll
 
-A small Flask service that fetches calendar events from iCal/webcal sources, persists them, detects added/removed/updated events, and sends a single summary email with changes.
+A Flask service that polls a webcal/iCal feed, stores the fetched events, detects additions/removals/updates, and sends a single change summary by email or Discord webhook.
 
-Key features
-- Periodically fetches events from configured webcal/iCal URLs
-- Persists events into a Mongo-like collection
-- Detects added, removed, and updated events (start/end changes)
-- Only acts on future events but allows removals for events that started up to 10 hours ago
-- Sends a single summary email containing added / removed / updated sections
+## Features
 
-This project was 100% made with vibe coding.
+- Fetches events from a configured iCal/webcal source
+- Normalizes and stores event data in MongoDB
+- Detects new, removed, and updated events
+- Sends one summary notification for the latest change set
+- Supports both SMTP email and Discord webhook delivery
+- Runs a background scheduler for periodic checks
+- Exposes lightweight HTTP endpoints for manual fetch/persist/check flows
 
-How to run locally
+## Architecture
 
-- Create and activate a virtual environment and install dependencies:
+The application follows a simple service-oriented layout:
+
+- `src/flight_controll/rest/` — Flask routes
+- `src/flight_controll/event/` — fetch, compare, persist, and notification logic
+- `src/flight_controll/repository/` — MongoDB interaction via repository classes
+- `src/flight_controll/mail/` — email and Discord delivery adapters
+- `src/flight_controll/scheduler/` — APScheduler setup
+- `src/flight_controll/config.py` — environment-driven configuration
+
+## Local setup
+
+Create and activate a virtual environment, then install the project dependencies:
 
 ```bash
 python -m venv .venv
-& .venv\Scripts\Activate.ps1   # Windows PowerShell
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 pip install -r requirements-test.txt
 ```
 
-- Run the app:
+Set the required environment variables before starting the app. A minimal example looks like this:
+
+```bash
+$env:WEB_CAL_URL="https://example.com/calendar.ics"
+$env:MONGO_HOST="mongodb+srv://cluster.example.mongodb.net"
+$env:MONGO_DB="flight_controll"
+$env:MONGO_COLLECTION="events"
+$env:SMTP_SERVER="smtp.example.com"
+$env:SMTP_PORT="587"
+$env:SMTP_USERNAME="user@example.com"
+$env:SMTP_PASSWORD="secret"
+$env:RECIPIENT_EMAIL="alerts@example.com"
+$env:SCHEDULER_ENABLED="true"
+$env:WEBCAL_SCHEDULER_DELAY_MINUTES="15"
+```
+
+Optional:
+
+```bash
+$env:DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+```
+
+If `DISCORD_WEBHOOK_URL` is set, notifications are sent there before falling back to SMTP delivery.
+
+## Running the app
+
+Start the Flask app from the project root:
 
 ```bash
 python main.py
 ```
 
-Docker / docker-compose
+The app listens on `0.0.0.0:3001` by default.
 
-- Build and start locally with docker-compose (the compose file is configured to build the local image):
+## HTTP API
+
+The app registers a blueprint at `/events` and exposes these endpoints:
+
+- `POST /events/trigger-check` — fetch the remote calendar, compare it with stored events, persist new ones, and send a summary notification
+- `POST /events/fetch` — fetch the remote calendar and return only newly discovered events without persisting them
+- `POST /events/fetch-persist` — fetch the remote calendar, keep only new events, and store them without sending email
+
+Example:
+
+```bash
+curl -X POST http://localhost:3001/events/trigger-check
+```
+
+## Scheduler
+
+The scheduler is initialized in the app factory and started when `SCHEDULER_ENABLED` is true.
+
+The scheduled task runs `fetch_persist_and_send_events()` and logs run details including counts and duration. You can disable it locally with:
+
+```bash
+$env:SCHEDULER_ENABLED="false"
+```
+
+## Docker
+
+Build and run the service with Docker Compose:
 
 ```bash
 docker-compose build
 docker-compose up
 ```
 
-Notes: the Dockerfile sets `PYTHONPATH=/app/src` so the `src/flight_controll` package is importable in the container.
+The Docker image sets `PYTHONPATH=/app/src` so the `src/flight_controll` package is importable inside the container.
 
-Interacting with the service
+## Testing
 
-- HTTP API: The app exposes a Flask blueprint under `/events` (see `src/flight_controll/rest/event_api.py`) with endpoints used for manual triggers and health checks:
-
-	- `POST /events/trigger-check` – fetch events, persist new ones, detect add/remove/update, send summary email
-	- `POST /events/fetch` – fetch events and return only those not yet stored (no persist)
-	- `POST /events/fetch-persist` – fetch events, filter to new only, persist them (no email)
-
-- Scheduler: The app registers a background scheduler job to fetch events periodically (interval configurable in `flight_controll.config`).
-
-- Email: The app uses an SMTP-backed `EmailSender` (`src/flight_controll/mail/sender.py`) to send a single summary email of added/removed/updated events. Configure SMTP in `flight_controll.config`.
-
-Testing
-
-- Run tests with pytest:
+Run the unit and integration tests with:
 
 ```bash
 pytest -q
 ```
 
-- CI: The repository includes GitHub Actions workflows in `.github/workflows/` that run tests and build/publish a Docker image. The test workflow sets `PYTHONPATH=src` so the package in `src/` is found during CI.
+The project includes coverage for event detection, fetchers, API behavior, scheduler behavior, and mail/Discord notification formatting.
+
+## Notes
+
+- Mongo configuration is intentionally environment-driven.
+- Scheduling, persistence, and notification delivery are injected so the app is easier to test without a live server or external services.
+- The app avoids naive datetimes and compares calendar data deterministically for change detection.
+
