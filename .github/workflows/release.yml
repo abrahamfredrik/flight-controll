@@ -34,11 +34,6 @@ jobs:
         with:
           fetch-depth: 0  # Required to get tags and full history
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.x"
-
       - name: Get Latest Tag
         id: get_latest_tag
         run: |
@@ -97,6 +92,8 @@ jobs:
 
           docker buildx build \
           --platform linux/amd64,linux/arm64 \
+          --cache-from type=gha,scope=flight-controll-release \
+          --cache-to type=gha,scope=flight-controll-release,mode=max \
           --tag $IMAGE:$VERSION \
           --tag $IMAGE:latest \
           --push .
