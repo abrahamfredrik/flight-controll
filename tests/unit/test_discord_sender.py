@@ -60,3 +60,17 @@ def test_transient_server_failure_retries(monkeypatch):
     sender.send_email("recipient", "Subject", "Body")
 
     assert len(posts) == 2
+
+
+def test_error_notification_uses_fallback_for_empty_description(monkeypatch):
+    from flight_controll.mail import error_notifier
+
+    sender = SimpleNamespace(send_email=lambda *args: calls.append(args))
+    calls = []
+    monkeypatch.setattr(
+        error_notifier, "DiscordWebhookSender", lambda **kwargs: sender
+    )
+
+    error_notifier.notify_discord_error("")
+
+    assert calls == [("", "Application error", "An error occurred.")]

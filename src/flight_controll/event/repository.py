@@ -59,8 +59,11 @@ class EventRepository:
     def update_one(self, uid: str, set_payload: Dict[str, Any]) -> Optional[object]:
         try:
             return self.collection.update_one({"uid": uid}, {"$set": set_payload})
-        except Exception:
+        except Exception as error:
             # Some fake collections don't implement update_one
+            from ..mail.error_notifier import notify_discord_error
+
+            notify_discord_error(error)
             return None
 
     def insert_events(self, events: List[Dict[str, Any]]) -> None:
@@ -95,8 +98,11 @@ def create_indexes(events_collection: object) -> None:
         # fake collections used in tests that don't implement it.
         events_collection.create_index([("uid", 1)], unique=True)
         events_collection.create_index([("start_time", 1)])
-    except Exception:
+    except Exception as error:
         # Ignore if the collection doesn't support index creation (e.g., fakes)
+        from ..mail.error_notifier import notify_discord_error
+
+        notify_discord_error(error)
         return
 
 

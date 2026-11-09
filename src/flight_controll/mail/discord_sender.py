@@ -34,9 +34,11 @@ class DiscordWebhookSender:
         password: Optional[str] = None,
         timeout: int = 10,
         max_retries: int = 3,
+        *,
+        webhook_url: Optional[str] = None,
     ) -> None:
         # Accept SMTP-ish args for compatibility; webhook comes from env
-        self.webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
+        self.webhook_url = webhook_url or os.environ.get("DISCORD_WEBHOOK_URL")
         self.timeout = timeout
         self.max_retries = max_retries
         self.logger = logging.getLogger(__name__)

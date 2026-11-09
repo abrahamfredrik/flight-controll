@@ -25,3 +25,19 @@ def test_init_scheduler_initializes_and_starts(mock_scheduler):
 
     mock_scheduler.init_app.assert_called_once_with(app)
     mock_scheduler.start.assert_called_once()
+
+
+@patch.object(scheduler_module, "notify_discord_error")
+@patch.object(scheduler_module, "scheduler")
+def test_scheduled_task_error_is_sent_to_discord(mock_scheduler, mock_notify):
+    app = DummyApp()
+    error = RuntimeError("calendar fetch failed")
+    app.extensions["make_event_service"] = MagicMock(
+        side_effect=error
+    )
+    mock_scheduler.task.return_value = lambda func: func
+
+    scheduler_module.init_scheduler(app)
+    app.extensions["_webcal_check_func"]()
+
+    mock_notify.assert_called_once_with(error, app.app_config)

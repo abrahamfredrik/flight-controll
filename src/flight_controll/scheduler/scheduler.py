@@ -1,5 +1,6 @@
 from flask_apscheduler import APScheduler
 import logging
+from ..mail.error_notifier import notify_discord_error
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +20,11 @@ def init_scheduler(app):
                 "webcal_check.completed",
                 extra={"task": "webcal_check", "new_events": new_count, "phase": "complete"},
             )
-        except Exception:
+        except Exception as error:
             logger.exception("Error during scheduled task webcal_check:")
+            notify_discord_error(
+                error, app.app_config
+            )
 
     scheduler.task(
         "interval",

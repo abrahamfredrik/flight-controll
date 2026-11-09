@@ -162,3 +162,6 @@ class MailService:
                 attempt += 1
         # all attempts failed
         self.logger.error("All %d attempts failed to send email to %s: %s", self.max_retries, recipient, last_exc)
+        from .error_notifier import notify_discord_error
+
+        notify_discord_error(last_exc)

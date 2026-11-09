@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Optional
 from flask import Flask
 import logging
+from .mail.error_notifier import notify_discord_error
 
 logger = logging.getLogger(__name__)
 
@@ -94,11 +95,13 @@ def init_extensions(app: Flask) -> None:
         try:
             from .event import repository as event_repository
             event_repository.create_indexes(events_collection)
-        except Exception:
+        except Exception as error:
             logger.exception("Failed to create indexes on events collection; continuing")
+            notify_discord_error(error, cfg)
         # Attach the shared collection for the app's service factory.
         app.extensions["mongo_client"] = client
         app.extensions["events_collection"] = events_collection
         logger.info("Mongo client and events collection attached to app.extensions")
-    except Exception:
+    except Exception as error:
         logger.exception("Failed to initialize Mongo client; continuing without DB")
+        notify_discord_error(error, cfg)

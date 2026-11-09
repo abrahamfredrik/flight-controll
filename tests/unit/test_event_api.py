@@ -63,3 +63,19 @@ def test_trigger_check_calls_fetch_persist_and_send(client):
     assert resp.status_code == 200
     assert resp.get_json() == data
     inst.fetch_persist_and_send_events.assert_called_once()
+
+
+def test_unhandled_endpoint_error_is_sent_to_discord(client, monkeypatch):
+    error = RuntimeError("database unavailable")
+    client.application.config["PROPAGATE_EXCEPTIONS"] = False
+    client.application.extensions["make_event_service"] = MagicMock(
+        side_effect=error
+    )
+    notify = MagicMock()
+    monkeypatch.setattr("flight_controll.notify_discord_error", notify)
+
+    response = client.post("/events/fetch")
+
+    assert response.status_code == 500
+    assert response.get_json() == {"error": "Internal Server Error"}
+    notify.assert_called_once_with(error, client.application.app_config)

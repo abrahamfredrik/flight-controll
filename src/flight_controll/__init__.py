@@ -1,10 +1,12 @@
 from flask import Flask
+from werkzeug.exceptions import HTTPException
 from typing import Optional
 
 from .config import Config
 from .rest import register_blueprints
 from .scheduler.scheduler import init_scheduler
 from .extensions import init_extensions
+from .mail.error_notifier import notify_discord_error
 
 
 def create_app(
@@ -30,6 +32,17 @@ def create_app(
         app.app_config = cfg()
     else:
         app.app_config = cfg
+
+    @app.errorhandler(Exception)
+    def report_unhandled_error(error: Exception):
+        if isinstance(error, HTTPException):
+            return error
+        app.logger.error(
+            "Unhandled application error",
+            exc_info=(type(error), error, error.__traceback__),
+        )
+        notify_discord_error(error, app.app_config)
+        return {"error": "Internal Server Error"}, 500
 
     # initialize long-lived extensions (Mongo client, collections, etc.)
     init_extensions(app)
