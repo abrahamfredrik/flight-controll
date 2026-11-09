@@ -3,5 +3,5 @@ requests==2.34.2
 Flask-APScheduler==1.13.1
 pymongo==4.19.0
 
-urllib3>=2.8.0
-setuptools>=78.1.1
+urllib3==2.8.0
+setuptools==84.2.1
